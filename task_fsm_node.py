@@ -521,14 +521,23 @@ class TaskFSMNode(Node):
             return
 
         if self.state == "QR_FOCUS":
-            # В QR_FOCUS метка НЕ обязательна
+            pre_goal = float(self.get_parameter("tag_goal_z_pre_qr").value)
+        
+            # Если QR временно потеряли:
             if not qr_ok:
+                # 1) если тег ещё видим — НЕ откатываемся, а удерживаемся у тега на pre_goal
+                if tag_ok:
+                    z_err_pre = z - pre_goal
+                    vx, vy, vz = self._tag_control(x_err=x_err, z_err=z_err_pre, ang=ang)
+                    self._send(vx, vy, vz)
+                    return
+        
+                # 2) если и тега нет — тогда уже откатываемся, но не через 1 секунду, а через 2.5
                 self._stop()
-                # если QR потеряли — можно вернуться к поиску тега и заново подойти
-                if self._elapsed(now) > 1.0:
+                if self._elapsed(now) > 2.5:
                     self._enter("FIND_TAG_FOR_PICK", now)
                 return
-
+        
             # intrinsics required
             if self.fx is None or self.cx is None:
                 self._stop()
