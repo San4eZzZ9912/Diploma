@@ -733,27 +733,42 @@ class TaskFSMNode(Node):
 
     # -------------------- Controllers --------------------
     def _tag_control(self, x_err: float, z_err: float, ang: float):
-        # yaw
+        # yaw (поворот)
         if abs(ang) > self.ang_tol:
             vz_cmd = clamp(-self.k_ang * ang, -self.max_vz, self.max_vz)
             vz = signed_floor_abs(vz_cmd, self.min_vz)
         else:
             vz = 0.0
-
-        # strafe
-        if abs(x_err) > self.grasp_x_tol:  # Use grasp tol for strafe too
+    
+        # strafe (в бок)
+        if abs(x_err) > self.grasp_x_tol:
             vy_cmd = clamp(-self.k_x * x_err, -self.max_vy, self.max_vy)
             vy = signed_floor_abs(vy_cmd, self.min_vy)
         else:
             vy = 0.0
-
-        # forward only when aligned enough
-        if abs(ang) <= self.ang_tol and abs(x_err) <= self.grasp_x_tol and z_err > 0.0:
+    
+        # forward (вперёд) — теперь едем сразу, корректируя себя по yaw и x одновременно
+        if z_err > 0.0:
             vx_cmd = clamp(self.k_z * z_err, 0.0, self.max_vx)
-            vx = max(vx_cmd, self.min_vx)
+    
+            # Чем сильнее ошибка по углу/смещению — тем меньше скорость вперёд.
+            # 4.0 — “мягкость”: чем больше, тем дольше робот сохраняет vx даже при ошибках.
+            ang_slow = max(self.ang_tol * 4.0, 1e-6)
+            x_slow = max(self.grasp_x_tol * 4.0, 1e-6)
+    
+            ang_scale = clamp(1.0 - (abs(ang) / ang_slow), 0.0, 1.0)
+            x_scale = clamp(1.0 - (abs(x_err) / x_slow), 0.0, 1.0)
+    
+            scale = min(ang_scale, x_scale)
+    
+            vx = vx_cmd * scale
+    
+            # Минималка вперёд — только если scale не совсем “в ноль” (чтобы не ехать при больших ошибках)
+            if vx > 0.0 and vx < self.min_vx and scale > 0.25:
+                vx = self.min_vx
         else:
             vx = 0.0
-
+    
         return vx, vy, vz
 
     # -------------------- Base I/O --------------------
