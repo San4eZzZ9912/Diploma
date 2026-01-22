@@ -443,7 +443,7 @@ class TaskFSMNode(Node):
             # поворот 1 секунду
             turn_vz = 0.6  # лучше вынести параметром
             self._send(0.0, 0.0, turn_vz)
-            if self._elapsed(now) >= 1.0:
+            if self._elapsed(now) >= 5.0:
                 self._stop()
                 # после поворота ищем метку "другого" стеллажа
                 self._enter("FIND_TAG_FOR_PLACE", now)
@@ -522,7 +522,7 @@ class TaskFSMNode(Node):
 
         if self.state == "QR_FOCUS":
             pre_goal = float(self.get_parameter("tag_goal_z_pre_qr").value)
-        
+
             # Если QR временно потеряли:
             if not qr_ok:
                 # 1) если тег ещё видим — НЕ откатываемся, а удерживаемся у тега на pre_goal
@@ -531,19 +531,18 @@ class TaskFSMNode(Node):
                     vx, vy, vz = self._tag_control(x_err=x_err, z_err=z_err_pre, ang=ang)
                     self._send(vx, vy, vz)
                     return
-        
+
                 # 2) если и тега нет — тогда уже откатываемся, но не через 1 секунду, а через 2.5
                 self._stop()
-                if self._elapsed(now) > 2.5:
+                if self._elapsed(now) > 2.0:
                     self._enter("FIND_TAG_FOR_PICK", now)
                 return
-        
+
             # intrinsics required
             if self.fx is None or self.cx is None:
                 self._stop()
                 return
 
-            # если tag есть (и он нужного ID) — используем z от tag, иначе деградация
             z_used = z if tag_ok else None
 
             # --- Compute u_target ---
@@ -695,10 +694,10 @@ class TaskFSMNode(Node):
 
         if self.state == "STRAFE_TO_SLOT":
             # упрощение: едем фиксированное время/или по tag_t.x как раньше
-            # пока по времени 1 сек
+            # пока по времени 2 сек
             v_y = -0.02 if self.place_side == "left" else 0.02
             self._send(0.0, v_y, 0.0)
-            if self._elapsed(now) >= 1.0:
+            if self._elapsed(now) >= 3.0:
                 self._stop()
                 self._enter("CALL_PLACE", now)
             return
@@ -748,37 +747,39 @@ class TaskFSMNode(Node):
             vz = signed_floor_abs(vz_cmd, self.min_vz)
         else:
             vz = 0.0
-    
+
         # strafe (в бок)
         if abs(x_err) > self.grasp_x_tol:
             vy_cmd = clamp(-self.k_x * x_err, -self.max_vy, self.max_vy)
             vy = signed_floor_abs(vy_cmd, self.min_vy)
         else:
             vy = 0.0
-    
+
         # forward (вперёд) — теперь едем сразу, корректируя себя по yaw и x одновременно
         if z_err > 0.0:
             vx_cmd = clamp(self.k_z * z_err, 0.0, self.max_vx)
-    
+
             # Чем сильнее ошибка по углу/смещению — тем меньше скорость вперёд.
             # 4.0 — “мягкость”: чем больше, тем дольше робот сохраняет vx даже при ошибках.
             ang_slow = max(self.ang_tol * 4.0, 1e-6)
             x_slow = max(self.grasp_x_tol * 4.0, 1e-6)
-    
+
             ang_scale = clamp(1.0 - (abs(ang) / ang_slow), 0.0, 1.0)
             x_scale = clamp(1.0 - (abs(x_err) / x_slow), 0.0, 1.0)
-    
+
             scale = min(ang_scale, x_scale)
-    
+
             vx = vx_cmd * scale
-    
+
             # Минималка вперёд — только если scale не совсем “в ноль” (чтобы не ехать при больших ошибках)
             if vx > 0.0 and vx < self.min_vx and scale > 0.25:
                 vx = self.min_vx
         else:
             vx = 0.0
-    
+
         return vx, vy, vz
+
+
 
     # -------------------- Base I/O --------------------
     def _send(self, vx: float, vy: float, vz: float):
