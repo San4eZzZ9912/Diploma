@@ -29,7 +29,7 @@ class QRDetectorNode(Node):
         self.declare_parameter('qr_valid', '/qr/valid')
 
         self.declare_parameter('max_fps', 20.0)            # обработка кадров
-        self.declare_parameter('publish_rate_hz', 10.0)    # частота публикации (heartbeat)
+        self.declare_parameter('publish_rate_hz', 20.0)    # частота публикации (heartbeat)
 
         self.declare_parameter('only_on_change', False)
 
@@ -37,7 +37,7 @@ class QRDetectorNode(Node):
         self.declare_parameter('target_payload', "Lower shelf")
 
         # Latch / anti-drop
-        self.declare_parameter('latch_sec', 2)             # сколько секунд держим последнее валидное измерение
+        self.declare_parameter('latch_sec', 0.45)             # сколько секунд держим последнее валидное измерение
         self.declare_parameter('max_miss', 8)              # сколько кадров подряд можно "не видеть" QR (для статистики)
 
         # Smoothing
@@ -259,10 +259,10 @@ class QRDetectorNode(Node):
             s = String()
             s.data = payload
             self.pub_text.publish(s)
-            self.get_logger().info(
-                f"QR latched: '{payload}' | u={self.last_good_u:.1f}px w={self.last_good_w:.1f}px "
-                f"(miss_count={self.miss_count})"
-            )
+#            self.get_logger().info(
+#                f"QR latched: '{payload}' | u={self.last_good_u:.1f}px w={self.last_good_w:.1f}px "
+#                f"(miss_count={self.miss_count})"
+#            )
 
 
 def main():
