@@ -145,6 +145,13 @@ class TaskFSMNode(Node):
         self.declare_parameter("back_off_speed", 0.10)     # vx negative speed for back-off
         self.declare_parameter("back_off_timeout", 13.0)    # max sec for back-off (safety)
 
+        # ===== New params for back-off after place =====
+        self.declare_parameter("place_back_off_speed", 0.10)  # vx negative speed after place
+        self.declare_parameter("place_back_off_sec", 2.0)     # sec to back off after place
+        self.declare_parameter("place_turn_speed", 0.6)       # vz speed for post-place turn
+        self.declare_parameter("place_turn_sec", 5.0)         # sec to turn after place
+        self.declare_parameter("place_release_timeout", 2.0)  # wait for arm_has_cube False
+
         # ===== New params for slot search on shelf =====
         self.declare_parameter("slot_strafe_distance", 0.03)  # m to strafe to check slot
         self.declare_parameter("slot_strafe_speed", 0.02)     # vy speed for strafe
@@ -200,6 +207,13 @@ class TaskFSMNode(Node):
         self.back_off_dist = float(self.get_parameter("back_off_distance").value)
         self.back_off_speed = float(self.get_parameter("back_off_speed").value)
         self.back_off_timeout = float(self.get_parameter("back_off_timeout").value)
+
+        # New place back-off
+        self.place_back_off_speed = float(self.get_parameter("place_back_off_speed").value)
+        self.place_back_off_sec = float(self.get_parameter("place_back_off_sec").value)
+        self.place_turn_speed = float(self.get_parameter("place_turn_speed").value)
+        self.place_turn_sec = float(self.get_parameter("place_turn_sec").value)
+        self.place_release_timeout = float(self.get_parameter("place_release_timeout").value)
 
         # New slot search
         self.slot_strafe_dist = float(self.get_parameter("slot_strafe_distance").value)
@@ -447,6 +461,20 @@ class TaskFSMNode(Node):
                 self._stop()
                 # после поворота ищем метку "другого" стеллажа
                 self._enter("FIND_TAG_FOR_PLACE", now)
+            return
+
+        if self.state == "BACK_OFF_AFTER_PLACE":
+            self._send(-self.place_back_off_speed, 0.0, 0.0)
+            if self._elapsed(now) >= self.place_back_off_sec:
+                self._stop()
+                self._enter("TURN_AFTER_PLACE", now)
+            return
+
+        if self.state == "TURN_AFTER_PLACE":
+            self._send(0.0, 0.0, self.place_turn_speed)
+            if self._elapsed(now) >= self.place_turn_sec:
+                self._stop()
+                self._enter("FIND_TAG_FOR_PICK", now)
             return
 
         # ----------------------------
@@ -732,7 +760,18 @@ class TaskFSMNode(Node):
                 self.pick_shelf_name, self.place_shelf_name = self.place_shelf_name, self.pick_shelf_name
                 self.place_side = None
 
-                self._enter("WAIT", now)
+                self._enter("WAIT_PLACE_RELEASE", now)
+            return
+
+        if self.state == "WAIT_PLACE_RELEASE":
+            self._stop()
+            if not self.arm_has_cube:
+                self._enter("BACK_OFF_AFTER_PLACE", now)
+                return
+
+            if self._elapsed(now) >= self.place_release_timeout:
+                self.get_logger().warn("Place release timeout: arm_has_cube still True -> continuing")
+                self._enter("BACK_OFF_AFTER_PLACE", now)
             return
 
         # fallback
