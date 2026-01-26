@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import math
-
+import threading
+import requests
 import rclpy
 from rclpy.node import Node
 
@@ -47,8 +48,8 @@ class TaskFSMNode(Node):
         # Set shelf_A_tag_id / shelf_B_tag_id to your real AprilTag IDs (or keep -1 to accept any).
         self.declare_parameter("use_tag_id_filter", True)
         self.declare_parameter("tag_id_topic", "/tag/id")
-        self.declare_parameter("shelf_A_tag_id", -1)
-        self.declare_parameter("shelf_B_tag_id", -1)
+        self.declare_parameter("shelf_A_tag_id", 1)
+        self.declare_parameter("shelf_B_tag_id", 2)
 
         # timers / stamps
         self.state_enter_t = None
@@ -60,7 +61,7 @@ class TaskFSMNode(Node):
         # slots memory (пока простая модель)
         # допустим два места: left/right
         self.shelf_slots = {
-            "A": {"left": True, "right": True},   # True=свободно
+            "A": {"left": False, "right": False},   # True=свободно
             "B": {"left": True, "right": True},
         }
         self.pick_shelf_name = "A"
@@ -76,7 +77,7 @@ class TaskFSMNode(Node):
         self.declare_parameter("ang_tolerance", 0.03)
 
         # IMPORTANT: compensates RGB camera optical axis offset to the right of the robot base center
-        self.declare_parameter("camera_offset_right_m", 0.021)
+        self.declare_parameter("camera_offset_right_m", 0.019)
 
         self.declare_parameter("k_ang", 0.6)
         self.declare_parameter("k_x", 0.5)
@@ -127,12 +128,12 @@ class TaskFSMNode(Node):
         self.declare_parameter("qr_min_vx", 0.006)
 
         # Filter QR measurements to reduce jitter (same idea as in monolithic node)
-        self.declare_parameter("qr_u_alpha", 0.8)
-        self.declare_parameter("qr_w_alpha", 0.8)
+        self.declare_parameter("qr_u_alpha", 1)
+        self.declare_parameter("qr_w_alpha", 1)
 
         # Low-pass for commanded velocities to reduce overshoot (0..1, higher = snappier)
         self.declare_parameter("vel_alpha_tag", 0.0)   # было "как раньше"
-        self.declare_parameter("vel_alpha_qr", 0.25)   # сглаживание только для QR
+        self.declare_parameter("vel_alpha_qr", 0.1)   # сглаживание только для QR
 
         self.declare_parameter("qr_timeout", 0.2)             # sec; qr must be updated recently
         self.declare_parameter("qr_target_payload", "")     # "" accepts any payload, else strict match
@@ -170,7 +171,21 @@ class TaskFSMNode(Node):
         # New param for slot QR check tol (to ignore off-center QR)
         self.declare_parameter("slot_qr_u_tol_px", 50.0)  # if |u_err| > this, ignore QR (it's from other slot)
 
+        # ===== REST backend (warehouse state) =====
+        self.declare_parameter("rest_enable", True)
+        self.declare_parameter("rest_base_url", "http://192.168.0.128:8080")  # поменяешь на IP ПК
+        self.declare_parameter("rest_timeout_sec", 0.6)
+        self.declare_parameter("rest_robot_id", "R1")
+        self.declare_parameter("rest_cube_qr_fallback", "Lower shelf")
+
         # ===== Read params =====
+        self.rest_enable = bool(self.get_parameter("rest_enable").value)
+        self.rest_base_url = str(self.get_parameter("rest_base_url").value).rstrip("/")
+        self.rest_timeout = float(self.get_parameter("rest_timeout_sec").value)
+        self.rest_robot_id = str(self.get_parameter("rest_robot_id").value)
+        self.rest_cube_qr_fallback = str(self.get_parameter("rest_cube_qr_fallback").value)
+        self.backend_cleared_once = False
+
         # Tag ID filtering
         self.use_tag_id_filter = bool(self.get_parameter("use_tag_id_filter").value)
         self.tag_id_topic = str(self.get_parameter("tag_id_topic").value)
@@ -209,6 +224,13 @@ class TaskFSMNode(Node):
         self.tag_half = self.tag_size / 2.0
         self.grasp_margin = float(self.get_parameter("grasp_margin").value)
         self.qr_u_tol_margin_px = float(self.get_parameter("qr_u_tol_margin_px").value)
+
+        # New place back-off
+        self.place_back_off_speed = float(self.get_parameter("place_back_off_speed").value)
+        self.place_back_off_sec = float(self.get_parameter("place_back_off_sec").value)
+        self.place_turn_speed = float(self.get_parameter("place_turn_speed").value)
+        self.place_turn_sec = float(self.get_parameter("place_turn_sec").value)
+        self.place_release_timeout = float(self.get_parameter("place_release_timeout").value)
 
         # Grasp tol for AprilTag (in world meters)
         self.grasp_x_tol = self.jaw_half - self.tag_half + self.grasp_margin
@@ -498,10 +520,10 @@ class TaskFSMNode(Node):
             self._send(-self.back_off_speed, 0.0, 0.0)
             if self._elapsed(now) >= 2.0:
                 self._stop()
-                self._enter("TURN_1S", now)
+                self._enter("TURN_5S", now)
             return
 
-        if self.state == "TURN_1S":
+        if self.state == "TURN_5S":
             # поворот 1 секунду
             turn_vz = 0.6  # лучше вынести параметром
             self._send(0.0, 0.0, turn_vz)
@@ -529,6 +551,20 @@ class TaskFSMNode(Node):
                     self._enter("NAV_TO_PICK", now)
                 else:
                     self._enter("FIND_TAG_FOR_PICK", now)
+            return
+
+        if self.state == "BACK_OFF_AFTER_PLACE":
+            self._send(-self.place_back_off_speed, 0.0, 0.0)
+            if self._elapsed(now) >= self.place_back_off_sec:
+                self._stop()
+                self._enter("TURN_AFTER_PLACE", now)
+            return
+
+        if self.state == "TURN_AFTER_PLACE":
+            self._send(0.0, 0.0, self.place_turn_speed)
+            if self._elapsed(now) >= self.place_turn_sec:
+                self._stop()
+                self._enter("FIND_TAG_FOR_PICK", now)
             return
 
         # ----------------------------
@@ -564,6 +600,14 @@ class TaskFSMNode(Node):
         # 4) Main FSM
         # ----------------------------
         if self.state == "WAIT":
+            # ✅ Очистка backend 1 раз при первом входе в WAIT
+            if self.rest_enable and not self.backend_cleared_once:
+                self.get_logger().info("Clearing backend shelf state (one-time on FSM start)")
+                for shelf_name in self.shelf_slots.keys():  # "A", "B"
+                    for side_lr in ["left", "right"]:
+                        self._report_clear_to_backend(shelf_name, side_lr)
+                self.backend_cleared_once = True
+
             # старт: если нет куба -> идём забирать
             if not self.arm_has_cube:
                 if self.use_nav_before_tag:
@@ -576,6 +620,7 @@ class TaskFSMNode(Node):
                 else:
                     self._enter("FIND_TAG_FOR_PLACE", now)
             return
+
 
         # ======== PICK ROUTE ========
 
@@ -782,12 +827,17 @@ class TaskFSMNode(Node):
             self._stop()
             # пока простая логика: берём первый свободный
             slots = self.shelf_slots[self.place_shelf_name]
+            self.get_logger().info(f"CHOOSE_SLOT: place_shelf={self.place_shelf_name} slots={self.shelf_slots[self.place_shelf_name]}")
+
             if slots["left"]:
                 self.place_side = "left"
+                self.get_logger().info(f"CHOOSE_SLOT: chosen place_side={self.place_side}")
                 self._enter("STRAFE_TO_SLOT", now)
             elif slots["right"]:
                 self.place_side = "right"
+                self.get_logger().info(f"CHOOSE_SLOT: chosen place_side={self.place_side}")
                 self._enter("STRAFE_TO_SLOT", now)
+                
             else:
                 self.get_logger().warn("No free slots -> wait")
                 # можно вернуться в WAIT или сделать другую стратегию
@@ -797,7 +847,7 @@ class TaskFSMNode(Node):
         if self.state == "STRAFE_TO_SLOT":
             # упрощение: едем фиксированное время/или по tag_t.x как раньше
             # пока по времени 2 сек
-            v_y = -0.02 if self.place_side == "left" else 0.02
+            v_y = 0.02 if self.place_side == "left" else -0.02
             self._send(0.0, v_y, 0.0)
             if self._elapsed(now) >= 3.0:
                 self._stop()
@@ -829,9 +879,13 @@ class TaskFSMNode(Node):
                 # обновляем "память" слотов
                 if self.place_side:
                     self.shelf_slots[self.place_shelf_name][self.place_side] = False
+                    self.get_logger().info(f"AFTER PLACE: shelf={self.place_shelf_name} updated slots={self.shelf_slots[self.place_shelf_name]}")
+
+                    # ✅ REST: сообщаем backend, куда положили
+                    self._report_place_to_backend(self.place_shelf_name, self.place_side)
 
                 # меняем стеллажи местами: следующий цикл будет "туда-обратно"
-                self.pick_shelf_name, self.place_shelf_name = self.place_shelf_name, self.pick_shelf_name
+                # self.pick_shelf_name, self.place_shelf_name = self.place_shelf_name, self.pick_shelf_name
                 self.place_side = None
 
                 self._enter("WAIT_PLACE_RELEASE", now)
@@ -851,6 +905,54 @@ class TaskFSMNode(Node):
         # fallback
         self._stop()
         self._enter("WAIT", now)
+
+
+    def _rest_post_async(self, path: str, payload: dict):
+        """Fire-and-forget POST to backend without blocking the FSM loop."""
+        if not self.rest_enable:
+            return
+
+        url = f"{self.rest_base_url}{path}"
+
+        def worker():
+            try:
+                r = requests.post(url, json=payload, timeout=self.rest_timeout)
+                if r.status_code >= 400:
+                    self.get_logger().warn(f"REST {path} -> {r.status_code}: {r.text[:200]}")
+                else:
+                    self.get_logger().info(f"REST {path} -> {r.status_code}")
+            except Exception as e:
+                self.get_logger().warn(f"REST {path} failed: {e}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _report_place_to_backend(self, shelf_code: str, side_lr: str):
+        """Send placement event to backend: /api/robot/place"""
+        side_enum = "LEFT" if side_lr == "left" else "RIGHT"
+        cube_qr = self.qr_payload if self.qr_payload else self.rest_cube_qr_fallback
+
+        payload = {
+            "shelfCode": str(shelf_code).strip().upper(),
+            "side": side_enum,
+            "cubeQr": cube_qr,
+            "robotId": self.rest_robot_id,
+        }
+        self._rest_post_async("/api/robot/place", payload)
+
+    def _report_clear_to_backend(self, shelf_code: str, side_lr: str):
+        """Send clear event to backend: /api/robot/clear"""
+        if not shelf_code or not side_lr:
+            return
+
+        side_enum = "LEFT" if side_lr == "left" else "RIGHT"
+
+        payload = {
+            "shelfCode": str(shelf_code).strip().upper(),
+            "side": side_enum,
+            "robotId": self.rest_robot_id,
+        }
+
+        self._rest_post_async("/api/robot/clear", payload)
 
     # -------------------- Controllers --------------------
     def _tag_control(self, x_err: float, z_err: float, ang: float):
@@ -891,8 +993,6 @@ class TaskFSMNode(Node):
             vx = 0.0
 
         return vx, vy, vz
-
-
 
     # -------------------- Base I/O --------------------
     def _send(self, vx: float, vy: float, vz: float):
