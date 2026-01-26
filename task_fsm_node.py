@@ -61,7 +61,7 @@ class TaskFSMNode(Node):
         # slots memory (пока простая модель)
         # допустим два места: left/right
         self.shelf_slots = {
-            "A": {"left": True, "right": True},   # True=свободно
+            "A": {"left": False, "right": False},   # True=свободно
             "B": {"left": True, "right": True},
         }
         self.pick_shelf_name = "A"
@@ -168,7 +168,7 @@ class TaskFSMNode(Node):
 
         # ===== REST backend (warehouse state) =====
         self.declare_parameter("rest_enable", True)
-        self.declare_parameter("rest_base_url", "http://192.168.0.105:8080")  # поменяешь на IP ПК
+        self.declare_parameter("rest_base_url", "http://192.168.0.128:8080")  # поменяешь на IP ПК
         self.declare_parameter("rest_timeout_sec", 0.6)
         self.declare_parameter("rest_robot_id", "R1")
         self.declare_parameter("rest_cube_qr_fallback", "Lower shelf")
@@ -733,12 +733,17 @@ class TaskFSMNode(Node):
             self._stop()
             # пока простая логика: берём первый свободный
             slots = self.shelf_slots[self.place_shelf_name]
+            self.get_logger().info(f"CHOOSE_SLOT: place_shelf={self.place_shelf_name} slots={self.shelf_slots[self.place_shelf_name]}")
+
             if slots["left"]:
                 self.place_side = "left"
+                self.get_logger().info(f"CHOOSE_SLOT: chosen place_side={self.place_side}")
                 self._enter("STRAFE_TO_SLOT", now)
             elif slots["right"]:
                 self.place_side = "right"
+                self.get_logger().info(f"CHOOSE_SLOT: chosen place_side={self.place_side}")
                 self._enter("STRAFE_TO_SLOT", now)
+                
             else:
                 self.get_logger().warn("No free slots -> wait")
                 # можно вернуться в WAIT или сделать другую стратегию
@@ -748,7 +753,7 @@ class TaskFSMNode(Node):
         if self.state == "STRAFE_TO_SLOT":
             # упрощение: едем фиксированное время/или по tag_t.x как раньше
             # пока по времени 2 сек
-            v_y = 0.02 if self.place_side == "left" else 0.02
+            v_y = 0.02 if self.place_side == "left" else -0.02
             self._send(0.0, v_y, 0.0)
             if self._elapsed(now) >= 3.0:
                 self._stop()
@@ -780,11 +785,13 @@ class TaskFSMNode(Node):
                 # обновляем "память" слотов
                 if self.place_side:
                     self.shelf_slots[self.place_shelf_name][self.place_side] = False
+                    self.get_logger().info(f"AFTER PLACE: shelf={self.place_shelf_name} updated slots={self.shelf_slots[self.place_shelf_name]}")
+
                     # ✅ REST: сообщаем backend, куда положили
                     self._report_place_to_backend(self.place_shelf_name, self.place_side)
 
                 # меняем стеллажи местами: следующий цикл будет "туда-обратно"
-                self.pick_shelf_name, self.place_shelf_name = self.place_shelf_name, self.pick_shelf_name
+                # self.pick_shelf_name, self.place_shelf_name = self.place_shelf_name, self.pick_shelf_name
                 self.place_side = None
 
                 self._enter("WAIT_PLACE_RELEASE", now)
