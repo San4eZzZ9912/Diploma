@@ -77,7 +77,7 @@ class TaskFSMNode(Node):
         self.declare_parameter("ang_tolerance", 0.03)
 
         # IMPORTANT: compensates RGB camera optical axis offset to the right of the robot base center
-        self.declare_parameter("camera_offset_right_m", 0.019)
+        self.declare_parameter("camera_offset_right_m", 0.021)
 
         self.declare_parameter("k_ang", 0.6)
         self.declare_parameter("k_x", 0.5)
@@ -100,12 +100,6 @@ class TaskFSMNode(Node):
 
         # ===== Pick anti-spam / re-arm =====
         self.declare_parameter("rearm_lost_sec", 0.5)
-
-        # ===== Navigation to shelf before tag detection =====
-        self.declare_parameter("use_nav_before_tag", True)
-        self.declare_parameter("nav_target_topic", "/nav/shelf_target")
-        self.declare_parameter("nav_reached_topic", "/nav/goal_reached")
-        self.declare_parameter("nav_timeout_sec", 20.0)
 
         # ===== QR focusing params =====
         self.declare_parameter("tag_goal_z_pre_qr", 0.34)     # distance at which we stop Tag-approach and start QR focus
@@ -157,7 +151,8 @@ class TaskFSMNode(Node):
         self.declare_parameter("place_back_off_sec", 2.0)     # sec to back off after place
         self.declare_parameter("place_turn_speed", 0.6)       # vz speed for post-place turn
         self.declare_parameter("place_turn_sec", 5.0)         # sec to turn after place
-        self.declare_parameter("place_release_timeout", 2.0)  # wait for arm_has_cube False
+        self.declare_parameter("place_release_timeout", 2.0)
+
 
         # ===== New params for slot search on shelf =====
         self.declare_parameter("slot_strafe_distance", 0.03)  # m to strafe to check slot
@@ -173,7 +168,7 @@ class TaskFSMNode(Node):
 
         # ===== REST backend (warehouse state) =====
         self.declare_parameter("rest_enable", True)
-        self.declare_parameter("rest_base_url", "http://192.168.0.128:8080")  # поменяешь на IP ПК
+        self.declare_parameter("rest_base_url", "http://192.168.0.110:8080")  # поменяешь на IP ПК
         self.declare_parameter("rest_timeout_sec", 0.6)
         self.declare_parameter("rest_robot_id", "R1")
         self.declare_parameter("rest_cube_qr_fallback", "Lower shelf")
@@ -212,10 +207,6 @@ class TaskFSMNode(Node):
         self.min_vz = float(self.get_parameter("min_vz").value)
 
         self.rearm_lost_sec = float(self.get_parameter("rearm_lost_sec").value)
-        self.use_nav_before_tag = bool(self.get_parameter("use_nav_before_tag").value)
-        self.nav_target_topic = str(self.get_parameter("nav_target_topic").value)
-        self.nav_reached_topic = str(self.get_parameter("nav_reached_topic").value)
-        self.nav_timeout_sec = float(self.get_parameter("nav_timeout_sec").value)
 
         # Geometry
         self.jaw_width = float(self.get_parameter("jaw_width").value)
@@ -239,13 +230,6 @@ class TaskFSMNode(Node):
         self.back_off_dist = float(self.get_parameter("back_off_distance").value)
         self.back_off_speed = float(self.get_parameter("back_off_speed").value)
         self.back_off_timeout = float(self.get_parameter("back_off_timeout").value)
-
-        # New place back-off
-        self.place_back_off_speed = float(self.get_parameter("place_back_off_speed").value)
-        self.place_back_off_sec = float(self.get_parameter("place_back_off_sec").value)
-        self.place_turn_speed = float(self.get_parameter("place_turn_speed").value)
-        self.place_turn_sec = float(self.get_parameter("place_turn_sec").value)
-        self.place_release_timeout = float(self.get_parameter("place_release_timeout").value)
 
         # New slot search
         self.slot_strafe_dist = float(self.get_parameter("slot_strafe_distance").value)
@@ -301,12 +285,6 @@ class TaskFSMNode(Node):
         self.arm_busy = False
         self.arm_has_cube = False
 
-        # navigation status
-        self.nav_reached = False
-        self.nav_goal_sent = False
-        self.nav_target_shelf = None
-        self.nav_request_t = None
-
         # New for back-off
         self.back_off_start_t = None
         self.back_off_start_z = None
@@ -345,10 +323,6 @@ class TaskFSMNode(Node):
         self.create_subscription(Float32, "/qr/u", self.on_qr_u, 10)
         self.create_subscription(Float32, "/qr/w", self.on_qr_w, 10)
         self.create_subscription(String, "/qr/data", self.on_qr_data, 10)
-
-        # ===== Navigation status =====
-        self.create_subscription(Bool, self.nav_reached_topic, self.on_nav_reached, 10)
-        self.nav_target_pub = self.create_publisher(String, self.nav_target_topic, 10)
 
         # ===== ARM services =====
         self.arm_pick = self.create_client(Trigger, "/arm/pick")
@@ -440,10 +414,6 @@ class TaskFSMNode(Node):
     def on_arm_has_cube(self, msg: Bool):
         self.arm_has_cube = bool(msg.data)
 
-    # -------------------- Nav status --------------------
-    def on_nav_reached(self, msg: Bool):
-        self.nav_reached = bool(msg.data)
-
     # -------------------- MCU PID --------------------
     def _apply_mcu_motion_pid_once(self):
         if self.car is None or self.motion_pid_applied:
@@ -479,30 +449,6 @@ class TaskFSMNode(Node):
             return 0.0
         return now - self.state_enter_t
 
-    def _maybe_send_nav_target(self, shelf_name: str, now: float):
-        if self.nav_target_shelf != shelf_name:
-            self.nav_target_shelf = shelf_name
-            self.nav_goal_sent = False
-            self.nav_reached = False
-            self.nav_request_t = now
-
-        if not self.nav_goal_sent:
-            msg = String()
-            msg.data = shelf_name
-            self.nav_target_pub.publish(msg)
-            self.nav_goal_sent = True
-            self.nav_request_t = now
-
-    def _nav_ready(self, now: float) -> bool:
-        if self.nav_reached:
-            return True
-        if self.nav_request_t is None:
-            return False
-        if (now - self.nav_request_t) >= self.nav_timeout_sec:
-            self.get_logger().warn("Nav timeout -> continue to tag search")
-            return True
-        return False
-
     def control_step(self):
         now = self._now_s()
 
@@ -530,27 +476,7 @@ class TaskFSMNode(Node):
             if self._elapsed(now) >= 5.0:
                 self._stop()
                 # после поворота ищем метку "другого" стеллажа
-                if self.use_nav_before_tag:
-                    self._enter("NAV_TO_PLACE", now)
-                else:
-                    self._enter("FIND_TAG_FOR_PLACE", now)
-            return
-
-        if self.state == "BACK_OFF_AFTER_PLACE":
-            self._send(-self.place_back_off_speed, 0.0, 0.0)
-            if self._elapsed(now) >= self.place_back_off_sec:
-                self._stop()
-                self._enter("TURN_AFTER_PLACE", now)
-            return
-
-        if self.state == "TURN_AFTER_PLACE":
-            self._send(0.0, 0.0, self.place_turn_speed)
-            if self._elapsed(now) >= self.place_turn_sec:
-                self._stop()
-                if self.use_nav_before_tag:
-                    self._enter("NAV_TO_PICK", now)
-                else:
-                    self._enter("FIND_TAG_FOR_PICK", now)
+                self._enter("FIND_TAG_FOR_PLACE", now)
             return
 
         if self.state == "BACK_OFF_AFTER_PLACE":
@@ -610,26 +536,13 @@ class TaskFSMNode(Node):
 
             # старт: если нет куба -> идём забирать
             if not self.arm_has_cube:
-                if self.use_nav_before_tag:
-                    self._enter("NAV_TO_PICK", now)
-                else:
-                    self._enter("FIND_TAG_FOR_PICK", now)
+                self._enter("FIND_TAG_FOR_PICK", now)
             else:
-                if self.use_nav_before_tag:
-                    self._enter("NAV_TO_PLACE", now)
-                else:
-                    self._enter("FIND_TAG_FOR_PLACE", now)
+                self._enter("FIND_TAG_FOR_PLACE", now)
             return
 
 
         # ======== PICK ROUTE ========
-
-        if self.state == "NAV_TO_PICK":
-            self._stop()
-            self._maybe_send_nav_target(self.pick_shelf_name, now)
-            if self._nav_ready(now):
-                self._enter("FIND_TAG_FOR_PICK", now)
-            return
 
         if self.state == "FIND_TAG_FOR_PICK":
             # просто ждём появления метки (нужного ID)
@@ -793,13 +706,6 @@ class TaskFSMNode(Node):
             return
 
         # ======== PLACE ROUTE ========
-
-        if self.state == "NAV_TO_PLACE":
-            self._stop()
-            self._maybe_send_nav_target(self.place_shelf_name, now)
-            if self._nav_ready(now):
-                self._enter("FIND_TAG_FOR_PLACE", now)
-            return
 
         if self.state == "FIND_TAG_FOR_PLACE":
             self._stop()
