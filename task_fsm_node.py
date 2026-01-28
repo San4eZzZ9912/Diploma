@@ -77,7 +77,7 @@ class TaskFSMNode(Node):
         self.declare_parameter("ang_tolerance", 0.03)
 
         # IMPORTANT: compensates RGB camera optical axis offset to the right of the robot base center
-        self.declare_parameter("camera_offset_right_m", 0.021)
+        self.declare_parameter("camera_offset_right_m", 0.020)
 
         self.declare_parameter("k_ang", 0.6)
         self.declare_parameter("k_x", 0.5)
@@ -107,7 +107,7 @@ class TaskFSMNode(Node):
 
         self.declare_parameter("pregrasp_wait", 2.0)          # hold time in QR-ready pose before pick
 
-        self.declare_parameter("qr_target_w_px", 185.0)       # target QR width at grasp distance (pixels)
+        self.declare_parameter("qr_target_w_px", 180.0)       # target QR width at grasp distance (pixels)
         self.declare_parameter("qr_u_tol_px", 25.0)
         # Hysteresis: once centered, keep it centered until error exceeds this threshold
         self.declare_parameter("qr_u_tol_exit_px", 35.0)
@@ -130,7 +130,7 @@ class TaskFSMNode(Node):
         self.declare_parameter("vel_alpha_qr", 0.1)   # сглаживание только для QR
 
         self.declare_parameter("qr_timeout", 0.2)             # sec; qr must be updated recently
-        self.declare_parameter("qr_target_payload", "")     # "" accepts any payload, else strict match
+        self.declare_parameter("qr_target_payload", "Lower shelf")     # "" accepts any payload, else strict match
 
         # CameraInfo topic (same as in your monolithic version)
         self.declare_parameter("camera_info_topic", "/camera/color/camera_info")
@@ -166,12 +166,31 @@ class TaskFSMNode(Node):
         # New param for slot QR check tol (to ignore off-center QR)
         self.declare_parameter("slot_qr_u_tol_px", 50.0)  # if |u_err| > this, ignore QR (it's from other slot)
 
+        self.declare_parameter("arm_settle_after_pick_sec", 0.6)
+
         # ===== REST backend (warehouse state) =====
         self.declare_parameter("rest_enable", True)
-        self.declare_parameter("rest_base_url", "http://192.168.0.110:8080")  # поменяешь на IP ПК
+        self.declare_parameter("rest_base_url", "http://192.168.0.113:8080")  # поменяешь на IP ПК
         self.declare_parameter("rest_timeout_sec", 0.6)
         self.declare_parameter("rest_robot_id", "R1")
         self.declare_parameter("rest_cube_qr_fallback", "Lower shelf")
+
+        # ===== Mission navigation =====
+        self.declare_parameter("use_mission_nav", True)
+        self.declare_parameter("mission_nav_pick_srv", "/mission/nav_pick")
+        self.declare_parameter("mission_nav_place_srv", "/mission/nav_place")
+        self.declare_parameter("mission_nav_retry_sec", 2.0)
+
+        self.use_mission_nav = bool(self.get_parameter("use_mission_nav").value)
+        self.mission_nav_pick_srv = str(self.get_parameter("mission_nav_pick_srv").value)
+        self.mission_nav_place_srv = str(self.get_parameter("mission_nav_place_srv").value)
+        self.mission_nav_retry_sec = float(self.get_parameter("mission_nav_retry_sec").value)
+
+        self.nav_pick_cli = self.create_client(Trigger, self.mission_nav_pick_srv)
+        self.nav_place_cli = self.create_client(Trigger, self.mission_nav_place_srv)
+
+        self.nav_future = None
+        self.nav_retry_until = 0.0
 
         # ===== Read params =====
         self.rest_enable = bool(self.get_parameter("rest_enable").value)
@@ -247,7 +266,10 @@ class TaskFSMNode(Node):
         self.create_subscription(CameraInfo, caminfo_topic, self.on_caminfo, 10)
 
         # ===== State machine =====
-        self.state = "WAIT_TAG"
+        self.state = "WAIT"
+
+        self.mission_nav_future = None
+        self.nav_retry_until = 0.0
 
         # latest tag data
         self.tag_seen = False
@@ -443,6 +465,8 @@ class TaskFSMNode(Node):
             self.state = new_state
             self.state_enter_t = now
             self.get_logger().info(f"FSM -> {new_state}")
+        if new_state in ("NAV_TO_PICK_ZONE", "NAV_TO_PLACE_ZONE"):
+            self.mission_nav_future = None
 
     def _elapsed(self, now: float) -> float:
         if self.state_enter_t is None:
@@ -466,8 +490,9 @@ class TaskFSMNode(Node):
             self._send(-self.back_off_speed, 0.0, 0.0)
             if self._elapsed(now) >= 2.0:
                 self._stop()
-                self._enter("TURN_5S", now)
+                self._enter("NAV_TO_PLACE_ZONE", now) if self.use_mission_nav else self._enter("FIND_TAG_FOR_PLACE", now)
             return
+
 
         if self.state == "TURN_5S":
             # поворот 1 секунду
@@ -479,12 +504,19 @@ class TaskFSMNode(Node):
                 self._enter("FIND_TAG_FOR_PLACE", now)
             return
 
+        if self.state == "ARM_SETTLE_AFTER_PICK":
+            self._stop()
+            if self._elapsed(now) >= float(self.get_parameter("arm_settle_after_pick_sec").value):
+                self._enter("BACK_OFF_2S", now)
+            return    
+
         if self.state == "BACK_OFF_AFTER_PLACE":
             self._send(-self.place_back_off_speed, 0.0, 0.0)
             if self._elapsed(now) >= self.place_back_off_sec:
                 self._stop()
-                self._enter("TURN_AFTER_PLACE", now)
+                self._enter("NAV_TO_PICK_ZONE", now) if self.use_mission_nav else self._enter("FIND_TAG_FOR_PICK", now)
             return
+
 
         if self.state == "TURN_AFTER_PLACE":
             self._send(0.0, 0.0, self.place_turn_speed)
@@ -536,14 +568,66 @@ class TaskFSMNode(Node):
 
             # старт: если нет куба -> идём забирать
             if not self.arm_has_cube:
-                self._enter("FIND_TAG_FOR_PICK", now)
+                self._enter("NAV_TO_PICK_ZONE", now) if self.use_mission_nav else self._enter("FIND_TAG_FOR_PICK", now)
             else:
-                self._enter("FIND_TAG_FOR_PLACE", now)
+                self._enter("NAV_TO_PLACE_ZONE", now) if self.use_mission_nav else self._enter("FIND_TAG_FOR_PLACE", now)
+            return
+
+        # ======== NAVIGATION WAYPOINTS ========
+        # ----------------------------
+        if self.use_mission_nav and self.state == "NAV_TO_PICK_ZONE":
+            # Важно: здесь НЕ рулём базой через Rosmaster (только Nav2)
+            if self.mission_nav_future is None:
+                if not self.nav_pick_cli.wait_for_service(timeout_sec=0.2):
+                    self.get_logger().warn("/mission/nav_pick not ready")
+                    return
+                self.get_logger().info("MissionNav: -> PICK zone")
+                self.mission_nav_future = self.nav_pick_cli.call_async(Trigger.Request())
+                return
+
+            if self.mission_nav_future.done():
+                try:
+                    res = self.mission_nav_future.result()
+                    self.get_logger().info(f"MissionNav PICK: success={res.success} msg='{res.message}'")
+                    self.mission_nav_future = None
+                    if res.success:
+                        self._enter("FIND_TAG_FOR_PICK", now)
+                    else:
+                        self._enter("WAIT", now)
+                except Exception as e:
+                    self.get_logger().error(f"MissionNav PICK error: {e}")
+                    self.mission_nav_future = None
+                    self._enter("WAIT", now)
             return
 
 
-        # ======== PICK ROUTE ========
+        if self.use_mission_nav and self.state == "NAV_TO_PLACE_ZONE":
+            if self.mission_nav_future is None:
+                if not self.nav_place_cli.wait_for_service(timeout_sec=0.2):
+                    self.get_logger().warn("/mission/nav_place not ready")
+                    return
+                self.get_logger().info("MissionNav: -> PLACE zone")
+                self.mission_nav_future = self.nav_place_cli.call_async(Trigger.Request())
+                return
 
+            if self.mission_nav_future.done():
+                try:
+                    res = self.mission_nav_future.result()
+                    self.get_logger().info(f"MissionNav PLACE: success={res.success} msg='{res.message}'")
+                    self.mission_nav_future = None
+                    if res.success:
+                        self._enter("FIND_TAG_FOR_PLACE", now)
+                    else:
+                        self._enter("WAIT", now)
+                except Exception as e:
+                    self.get_logger().error(f"MissionNav PLACE error: {e}")
+                    self.mission_nav_future = None
+                    self._enter("WAIT", now)
+            return
+
+
+
+        # ======== PICK ROUTE ========
         if self.state == "FIND_TAG_FOR_PICK":
             # просто ждём появления метки (нужного ID)
             self._stop()
@@ -696,7 +780,7 @@ class TaskFSMNode(Node):
 
             # 2) критерий "захват реально закончился": arm_busy False и has_cube True
             if (not self.arm_busy) and self.arm_has_cube:
-                self._enter("BACK_OFF_2S", now)
+                self._enter("ARM_SETTLE_AFTER_PICK", now)
                 return
 
             # если рука закончила, но куба нет — значит неудача
