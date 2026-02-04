@@ -20,6 +20,7 @@ public interface SlotStateRepository extends JpaRepository<SlotState, Integer> {
         where ss.occupied = false
           and ss.reserved = false
           and sl.enabled = true
+          and sh.role = 'STORAGE'
         order by sh.shelf_code asc, sl.level asc, sl.side asc
         for update skip locked
         limit 1

@@ -14,10 +14,14 @@ CREATE TABLE shelves (
     shelf_id    SERIAL PRIMARY KEY,
     shelf_code  VARCHAR(10) NOT NULL UNIQUE,
     description TEXT,
+	role VARCHAR(16) NOT NULL DEFAULT 'PICK',
 
     map_x   DOUBLE PRECISION,
     map_y   DOUBLE PRECISION,
-    map_yaw DOUBLE PRECISION
+    map_yaw DOUBLE PRECISION,
+
+	CONSTRAINT chk_role
+	CHECK (role IN ('PICK', 'STORAGE'))
 );
 
 -- -------------------------
@@ -96,10 +100,10 @@ CREATE INDEX idx_products_manu ON products(manufacturer);
 CREATE TABLE inbounds (
     inbound_id SERIAL PRIMARY KEY,
 
-    source VARCHAR(128),              
-    external_ref VARCHAR(64),          
-    file_name VARCHAR(255),            
-    file_hash VARCHAR(64),             
+    source VARCHAR(128),
+    external_ref VARCHAR(64),
+    file_name VARCHAR(255),
+    file_hash VARCHAR(64),
 
     status VARCHAR(16) NOT NULL DEFAULT 'NEW',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -171,24 +175,30 @@ CREATE INDEX idx_tasks_inbound_line ON tasks(inbound_line_id);
 CREATE INDEX idx_tasks_product      ON tasks(product_id);
 
 -- ============================================================
--- SEED EXAMPLE 
+-- SEED EXAMPLE
 -- ============================================================
-INSERT INTO shelves (shelf_code, description)
+INSERT INTO shelves (shelf_code, description, role)
 VALUES
-  ('A', 'Shelf A'),
-  ('B', 'Shelf B');
+  ('A', 'Shelf A', 'STORAGE'),
+  ('B', 'Shelf B', 'PICK'),
+  ('C', 'Shelf C', 'PICK');
 
--- Example shelf coordinates 
+-- Example shelf coordinates
 UPDATE shelves SET map_x = 0.1,  map_y = -1.0, map_yaw = -1.57 WHERE shelf_code = 'A';
 UPDATE shelves SET map_x = -1.0, map_y = -1.0, map_yaw =  3.14 WHERE shelf_code = 'B';
+UPDATE shelves SET map_x = 1.0, map_y = -2.0, map_yaw =  3.14 WHERE shelf_code = 'C';
 
--- Create slots: A/B, LEFT/RIGHT, UPPER only 
+
+-- Create slots: A/B, LEFT/RIGHT, UPPER only
 INSERT INTO shelf_slots (shelf_code, side, level, apriltag_id, enabled)
 VALUES
-  ('A', 'RIGHT', 'UPPER', 1, true),
-  ('A', 'LEFT',  'UPPER', 1, true),
-  ('B', 'RIGHT', 'UPPER', 2, true),
-  ('B', 'LEFT',  'UPPER', 2, true);
+  ('A', 'RIGHT', 'UPPER', 0, true),
+  ('A', 'RIGHT', 'UPPER', 0, true),
+  ('B', 'RIGHT', 'UPPER', 1, true),
+
+  ('B', 'LEFT',  'UPPER', 1, true),
+  ('C', 'RIGHT', 'UPPER', 2, true),
+  ('C', 'LEFT',  'UPPER', 2, true);
 
 -- Initialize slot_state rows (1:1 per slot)
 INSERT INTO slot_state (slot_id, occupied, cube_qr, updated_at, robot_id)

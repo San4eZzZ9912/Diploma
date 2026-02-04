@@ -1,5 +1,6 @@
 package com.diploma.robot_warehouse_backend.entity;
 
+import com.diploma.robot_warehouse_backend.enums.Role;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -24,6 +25,11 @@ public class Shelf {
 
     @Column(name = "map_x")
     private Double mapX;
+
+    @Column(name = "role", nullable = false)
+    @Enumerated(EnumType.STRING)
+    @Setter
+    private Role role;
 
     @Column(name = "map_y")
     private Double mapY;
