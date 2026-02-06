@@ -184,7 +184,10 @@ class TaskFSMNode(Node):
         self.declare_parameter("rest_base_url", "http://192.168.0.110:8080")  # поменяешь на IP ПК
         self.declare_parameter("rest_timeout_sec", 0.6)
         self.declare_parameter("rest_robot_id", "R1")
-        self.declare_parameter("rest_cube_qr_fallback", "Lower shelf")
+        self.declare_parameter("rest_cube_qr_fallback", "UNKNOWN/UNKNOWN")
+
+        # ===== Task routing =====
+        self.declare_parameter("pick_shelf_code", "A")
 
         # ===== Mission navigation =====
         self.declare_parameter("use_mission_nav", True)
@@ -210,6 +213,9 @@ class TaskFSMNode(Node):
         self.rest_robot_id = str(self.get_parameter("rest_robot_id").value)
         self.rest_cube_qr_fallback = str(self.get_parameter("rest_cube_qr_fallback").value)
         self.backend_cleared_once = False
+        self.pick_shelf_code = str(self.get_parameter("pick_shelf_code").value).strip().upper()
+
+        self.pick_shelf_name = self.pick_shelf_code
 
         # Tag ID filtering
         self.use_tag_id_filter = bool(self.get_parameter("use_tag_id_filter").value)
@@ -879,8 +885,8 @@ class TaskFSMNode(Node):
                 self.place_future = None
                 
                 # после того как place сервис отработал и ты переходишь дальше:
-                observed_qr = self.qr_payload if self.qr_payload else self.rest_cube_qr_fallback
-
+                observed_qr = self._normalize_observed_qr(self.qr_payload) or self._normalize_observed_qr(self.rest_cube_qr_fallback)
+                
                 # успех считаем по факту: куб пропал из лапы (arm_has_cube False) — можно чуть позже, но для старта так
                 # проще: считаем success=True, если place service ответил success (если у тебя это есть)
                 success = True
@@ -930,6 +936,20 @@ class TaskFSMNode(Node):
                 self.get_logger().warn(f"REST {path} failed: {e}")
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _normalize_observed_qr(self, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        parts = cleaned.split("/", 1)
+        if len(parts) != 2:
+            return None
+        sku, manufacturer = (part.strip() for part in parts)
+        if not sku or not manufacturer:
+            return None
+        return f"{sku}/{manufacturer}"
 
     def _fetch_next_task(self):
         """GET /api/robot/tasks/next?robotId=R1 -> dict or None (if 204)"""
@@ -986,7 +1006,7 @@ class TaskFSMNode(Node):
         side = str(task_json["targetSide"]).strip().upper()      # LEFT/RIGHT
         level = str(task_json["targetLevel"]).strip().upper()    # UPPER/LOWER
 
-        self.place_shelf_name = shelf_code
+        self.pick_shelf_name = self.pick_shelf_code
         self.current_target_level = level
         self.current_target_side = "left" if side == "LEFT" else "right"
 
