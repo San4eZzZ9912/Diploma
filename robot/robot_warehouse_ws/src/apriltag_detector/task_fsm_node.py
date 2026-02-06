@@ -49,12 +49,15 @@ class TaskFSMNode(Node):
         # Set shelf_A_tag_id / shelf_B_tag_id to your real AprilTag IDs (or keep -1 to accept any).
         self.declare_parameter("use_tag_id_filter", True)
         self.declare_parameter("tag_id_topic", "/tag/id")
-        self.declare_parameter("shelf_A_tag_id", 1)
-        self.declare_parameter("shelf_B_tag_id", 2)
+        self.declare_parameter("shelf_A_tag_id", 0)
+        self.declare_parameter("shelf_B_tag_id", 1)
+        self.declare_parameter("shelf_C_tag_id", 2)
         
 
         self.pub_pick_pose = self.create_publisher(Pose2D, "/mission/pick_pose2d", 10)
         self.pub_place_pose = self.create_publisher(Pose2D, "/mission/place_pose2d", 10)
+        self.pub_qr_target = self.create_publisher(String, "/qr/target", 10)
+
 
         self.current_task = None
         self.current_task_id = None
@@ -113,12 +116,12 @@ class TaskFSMNode(Node):
         self.declare_parameter("rearm_lost_sec", 0.5)
 
         # ===== QR focusing params =====
-        self.declare_parameter("tag_goal_z_pre_qr", 0.50)     # distance at which we stop Tag-approach and start QR focus
+        self.declare_parameter("tag_goal_z_pre_qr", 0.35)     # distance at which we stop Tag-approach and start QR focus
         self.declare_parameter("pre_qr_z_margin", 0.03)       # allow a little margin to switch to QR
 
         self.declare_parameter("pregrasp_wait", 2.0)          # hold time in QR-ready pose before pick
 
-        self.declare_parameter("qr_target_w_px", 115.0)       # target QR width at grasp distance (pixels)
+        self.declare_parameter("qr_target_w_px", 170.0)       # target QR width at grasp distance (pixels)
         self.declare_parameter("qr_u_tol_px", 25.0)
         # Hysteresis: once centered, keep it centered until error exceeds this threshold
         self.declare_parameter("qr_u_tol_exit_px", 35.0)
@@ -181,7 +184,7 @@ class TaskFSMNode(Node):
 
         # ===== REST backend (warehouse state) =====
         self.declare_parameter("rest_enable", True)
-        self.declare_parameter("rest_base_url", "http://192.168.0.110:8080")  # поменяешь на IP ПК
+        self.declare_parameter("rest_base_url", "http://192.168.0.109:8080")  # поменяешь на IP ПК
         self.declare_parameter("rest_timeout_sec", 0.6)
         self.declare_parameter("rest_robot_id", "R1")
         self.declare_parameter("rest_cube_qr_fallback", "UNKNOWN/UNKNOWN")
@@ -214,7 +217,6 @@ class TaskFSMNode(Node):
         self.rest_cube_qr_fallback = str(self.get_parameter("rest_cube_qr_fallback").value)
         self.backend_cleared_once = False
         self.pick_shelf_code = str(self.get_parameter("pick_shelf_code").value).strip().upper()
-
         self.pick_shelf_name = self.pick_shelf_code
 
         # Tag ID filtering
@@ -886,7 +888,6 @@ class TaskFSMNode(Node):
                 
                 # после того как place сервис отработал и ты переходишь дальше:
                 observed_qr = self._normalize_observed_qr(self.qr_payload) or self._normalize_observed_qr(self.rest_cube_qr_fallback)
-                
                 # успех считаем по факту: куб пропал из лапы (arm_has_cube False) — можно чуть позже, но для старта так
                 # проще: считаем success=True, если place service ответил success (если у тебя это есть)
                 success = True
@@ -937,20 +938,6 @@ class TaskFSMNode(Node):
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _normalize_observed_qr(self, value: str | None) -> str | None:
-        if value is None:
-            return None
-        cleaned = value.strip()
-        if not cleaned:
-            return None
-        parts = cleaned.split("/", 1)
-        if len(parts) != 2:
-            return None
-        sku, manufacturer = (part.strip() for part in parts)
-        if not sku or not manufacturer:
-            return None
-        return f"{sku}/{manufacturer}"
-
     def _fetch_next_task(self):
         """GET /api/robot/tasks/next?robotId=R1 -> dict or None (if 204)"""
         if not self.rest_enable:
@@ -966,6 +953,20 @@ class TaskFSMNode(Node):
         except Exception as e:
             self.get_logger().warn(f"REST next task failed: {e}")
             return None
+
+    def _normalize_observed_qr(self, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        parts = cleaned.split("/", 1)
+        if len(parts) != 2:
+            return None
+        sku, manufacturer = (part.strip() for part in parts)
+        if not sku or not manufacturer:
+            return None
+        return f"{sku}/{manufacturer}"
 
     def _complete_task_async(self, task_id: int, success: bool, observed_qr: str | None):
         """POST /api/robot/tasks/{id}/complete"""
@@ -1000,13 +1001,14 @@ class TaskFSMNode(Node):
         """
         self.current_task = task_json
         self.current_task_id = int(task_json["taskId"])
+        self.pick_shelf_name = self.pick_shelf_code
 
         # куда класть
         shelf_code = str(task_json["targetShelfCode"]).strip().upper()
         side = str(task_json["targetSide"]).strip().upper()      # LEFT/RIGHT
         level = str(task_json["targetLevel"]).strip().upper()    # UPPER/LOWER
 
-        self.pick_shelf_name = self.pick_shelf_code
+        self.place_shelf_name = shelf_code
         self.current_target_level = level
         self.current_target_side = "left" if side == "LEFT" else "right"
 
@@ -1021,6 +1023,17 @@ class TaskFSMNode(Node):
             f"Task accepted: id={self.current_task_id} place={shelf_code} {side} {level} "
             f"pose=({p.x:.2f},{p.y:.2f},{p.theta:.2f})"
         )
+        
+        sku = str(task_json.get("sku", "")).strip()
+        mfr = str(task_json.get("manufacturer", "")).strip()
+        target_payload = f"{sku}/{mfr}".strip()
+
+        msg = String()
+        msg.data = target_payload
+        self.pub_qr_target.publish(msg)
+
+        self.get_logger().info(f"QR target published: {target_payload}")
+
 
     def _report_clear_to_backend(self, shelf_code: str, side_lr: str):
         """Send clear event to backend: /api/robot/clear"""
