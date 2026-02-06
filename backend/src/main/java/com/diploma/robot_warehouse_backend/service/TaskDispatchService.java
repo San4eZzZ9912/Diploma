@@ -49,7 +49,7 @@ public class TaskDispatchService {
         task.setTargetSide(slot.getSide().name());
         task.setUpdatedAt(LocalDateTime.now());
 
-        Product product = new Product();
+        Product product = task.getProduct();
 
         TaskResponse taskResponse = new TaskResponse(
                 task.getId(),
@@ -62,6 +62,8 @@ public class TaskDispatchService {
                 shelf.getMapY(),
                 shelf.getMapYaw()
         );
+        slotStateRepository.save(freeState);
+        taskRepository.save(task);
 
         return Optional.of(taskResponse);
     }
