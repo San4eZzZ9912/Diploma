@@ -5,236 +5,226 @@ import cv2
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 
 from sensor_msgs.msg import Image
 from std_msgs.msg import String, Float32, Bool
 from cv_bridge import CvBridge
 
-# pyzbar
 try:
     from pyzbar.pyzbar import decode as zbar_decode
 except Exception:
     zbar_decode = None
 
 
+def _poly_to_np(poly) -> np.ndarray:
+    pts = []
+    for p in poly:
+        if hasattr(p, "x") and hasattr(p, "y"):
+            pts.append([float(p.x), float(p.y)])
+        else:
+            pts.append([float(p[0]), float(p[1])])
+    return np.array(pts, dtype=np.float32)
+
+
+def _geom_from_polygon(pts: np.ndarray):
+    """
+    Returns:
+      u_center (px), w_px (px), area (px^2)
+    """
+    if pts is None or len(pts) < 2:
+        return None, None, None
+
+    u_center = float(np.mean(pts[:, 0]))
+
+    rect = cv2.minAreaRect(pts.reshape(-1, 1, 2))
+    (w, h) = rect[1]
+    w_px = float(max(w, h))
+    area = float(w * h)
+    return u_center, w_px, area
+
+
 class QRDetectorNode(Node):
+    """
+    - Subscribes to camera image
+    - Always keeps ONLY the latest frame (no backlog)
+    - Decodes QR via pyzbar
+    - Publishes:
+        /qr/valid (Bool)
+        /qr/u     (Float32)  center x in pixels
+        /qr/w     (Float32)  "width" of QR in pixels (max side of minAreaRect)
+        /qr/data  (String)   decoded payload
+    - valid_hold_sec: keep valid True for a short time after last detection
+      to avoid QR_FOCUS stopping due to brief decode drop.
+    """
+
     def __init__(self):
-        super().__init__('qr_detector_node')
+        super().__init__("qr_detector_node")
 
-        # --- Params ---
-        self.declare_parameter('image_topic', '/camera/color/image_raw')
-        self.declare_parameter('out_topic', '/qr/data')
-        self.declare_parameter('qr_u', '/qr/u')
-        self.declare_parameter('qr_w', '/qr/w')
-        self.declare_parameter('qr_valid', '/qr/valid')
+        # ---- params ----
+        self.declare_parameter("image_topic", "/camera/color/image_raw")
+        self.declare_parameter("publish_hz", 20.0)          # publish + decode tick rate
+        self.declare_parameter("valid_hold_sec", 0.9)       # how long we keep qr_valid True after last detection
+        self.declare_parameter("only_qrcode_type", True)    # ignore other barcodes
 
-        self.declare_parameter('max_fps', 20.0)            # обработка кадров
-        self.declare_parameter('publish_rate_hz', 20.0)    # частота публикации (heartbeat)
+        image_topic = self.get_parameter("image_topic").value
+        publish_hz = float(self.get_parameter("publish_hz").value)
+        publish_hz = 20.0 if publish_hz <= 0 else publish_hz
 
-        self.declare_parameter('only_on_change', False)
+        # ---- qos: keep only last frame, best effort (sensor-like) ----
+        qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+        )
 
-        # Strict target payload (only publish when this exact text is found)
-        self.declare_parameter('target_payload', "Lower shelf")
+        self.sub = self.create_subscription(Image, image_topic, self.on_image, qos)
 
-        # Latch / anti-drop
-        self.declare_parameter('latch_sec', 0.45)             # сколько секунд держим последнее валидное измерение
-        self.declare_parameter('max_miss', 8)              # сколько кадров подряд можно "не видеть" QR (для статистики)
+        self.pub_valid = self.create_publisher(Bool, "/qr/valid", 10)
+        self.pub_u = self.create_publisher(Float32, "/qr/u", 10)
+        self.pub_w = self.create_publisher(Float32, "/qr/w", 10)
+        self.pub_data = self.create_publisher(String, "/qr/data", 10)
 
-        # Smoothing
-        self.declare_parameter('ema_alpha', 0.60)          # 0..1, больше -> быстрее реагирует
-
-        image_topic = self.get_parameter('image_topic').value
-        out_topic = self.get_parameter('out_topic').value
-        pub_qr_u = self.get_parameter('qr_u').value
-        pub_qr_w = self.get_parameter('qr_w').value
-        pub_qr_valid = self.get_parameter('qr_valid').value
-
-        self.target_payload = self.get_parameter('target_payload').value
-
-        # --- ROS I/O ---
-        self.sub = self.create_subscription(Image, image_topic, self.on_image, 10)
-        self.pub_text = self.create_publisher(String, out_topic, 10)
-        self.pub_u = self.create_publisher(Float32, pub_qr_u, 10)
-        self.pub_w = self.create_publisher(Float32, pub_qr_w, 10)
-        self.pub_valid = self.create_publisher(Bool, pub_qr_valid, 10)
-
-        # --- CV ---
         self.bridge = CvBridge()
 
         if zbar_decode is None:
-            self.get_logger().error(
-                "pyzbar is not available. Install: sudo apt-get install libzbar0 && pip install pyzbar"
-            )
+            self.get_logger().error("pyzbar not available. Install: sudo apt-get install libzbar0 && pip3 install pyzbar")
 
-        # --- State ---
-        self._last_frame_t = 0.0
-        self._last_payload_pub = None
+        self._target_payload = ""  # normalized "SKU/MANUFACTURER"
+        self.create_subscription(String, "/qr/target", self._on_target, 10)
+            
+        # latest frame storage (no backlog)
+        self._latest_img_msg = None
+        self._latest_seq = 0
+        self._processed_seq = 0
 
-        # last good detection (latched)
-        self.last_good_payload = None
-        self.last_good_u = None
-        self.last_good_w = None
-        self.last_good_t = 0.0
+        # last detection (latched)
+        self._last_det_t = 0.0
+        self._last_u = None
+        self._last_w = None
+        self._last_data = ""
 
-        # EMA filtered values
-        self.u_f = None
-        self.w_f = None
-
-        self.miss_count = 0
-
-        # publish timer (heartbeat)
-        rate = float(self.get_parameter('publish_rate_hz').value)
-        rate = 10.0 if rate <= 0 else rate
-        self.timer = self.create_timer(1.0 / rate, self.publish_tick)
+        self.timer = self.create_timer(1.0 / publish_hz, self.tick)
 
         self.get_logger().info(
-            f"QR detector (pyzbar) started. Sub: {image_topic} | Pub: {out_topic}, {pub_qr_u}, {pub_qr_w}, {pub_qr_valid} | "
-            f"target_payload='{self.target_payload}'"
+            f"QR detector started. image_topic={image_topic}, publish_hz={publish_hz}, valid_hold_sec={self.get_parameter('valid_hold_sec').value}"
         )
 
-    def _fps_limit(self) -> bool:
-        max_fps = float(self.get_parameter('max_fps').value)
-        now = time.time()
-        if max_fps > 0 and (now - self._last_frame_t) < (1.0 / max_fps):
-            return False
-        self._last_frame_t = now
-        return True
-
     @staticmethod
-    def _poly_to_np(poly) -> np.ndarray:
-        """
-        poly from pyzbar is a list of Points (x,y). Can be 4 points, but may be >4.
-        returns Nx2 float32
-        """
-        pts = []
-        for p in poly:
-            # p may have attributes x,y or be tuple-like
-            if hasattr(p, "x") and hasattr(p, "y"):
-                pts.append([float(p.x), float(p.y)])
-            else:
-                pts.append([float(p[0]), float(p[1])])
-        return np.array(pts, dtype=np.float32)
+    def _norm_payload(s: str) -> str:
+        if s is None:
+            return ""
+        s = s.strip().upper()
+        s = s.replace(" / ", "/").replace("/ ", "/").replace(" /", "/")
+        return s
 
-    @staticmethod
-    def _geom_from_points(pts: np.ndarray):
-        """
-        Compute u_center and w_px from polygon points.
-        - u_center: mean x
-        - w_px: width of the QR in pixels (robust):
-            * if >=4 points: minAreaRect width (max side)
-        """
-        if pts is None or len(pts) < 2:
-            return None, None
-
-        u_center = float(np.mean(pts[:, 0]))
-
-        # robust width using minAreaRect (handles 4..N points)
-        rect = cv2.minAreaRect(pts.reshape(-1, 1, 2))
-        (w, h) = rect[1]
-        w_px = float(max(w, h))  # take larger side as "width"
-
-        return u_center, w_px
-
+    def _on_target(self, msg: String):
+        self._target_payload = self._norm_payload(msg.data)
+        self.get_logger().info(f"QR target set to: '{self._target_payload}'")
+        
     def on_image(self, msg: Image):
-        if not self._fps_limit():
-            return
+        # keep only latest
+        self._latest_img_msg = msg
+        self._latest_seq += 1
 
+    def _decode_qr_from_gray(self, gray):
         if zbar_decode is None:
-            # can't decode, count miss
-            self.miss_count += 1
-            return
+            return None
 
-        # Convert image
-        try:
-            img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
-            gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-        except Exception as e:
-            self.get_logger().warning(f"cv_bridge error: {e}")
-            return
+        target = self._target_payload  # already normalized
 
-        # Decode all symbols in frame
         results = zbar_decode(gray)
         if not results:
-            self.miss_count += 1
-            return
+            return None
 
-        target = (self.get_parameter('target_payload').value or "").strip()
+        only_qr = bool(self.get_parameter("only_qrcode_type").value)
 
-        chosen = None
-        chosen_payload = None
-        chosen_pts = None
+        best = None
+        best_area = -1.0
+        best_u = None
+        best_w = None
+        best_data = None
 
-        # pick first matching
         for r in results:
             try:
-                payload = r.data.decode('utf-8', errors='ignore')
+                r_type = getattr(r, "type", "")
             except Exception:
-                payload = str(r.data)
+                r_type = ""
 
-            payload_stripped = payload.strip()
+            if only_qr and r_type and r_type.upper() != "QRCODE":
+                continue
 
-            if target == "":
-                # ANY: take first non-empty
-                if payload_stripped != "":
-                    chosen = r
-                    chosen_payload = payload
-                    break
+            # payload
+            try:
+                data = r.data.decode("utf-8", errors="replace")
+            except Exception:
+                data = str(r.data)
+
+            data_n = self._norm_payload(data)
+
+            # Если target задан — игнорируем все чужие QR
+            if target != "" and data_n != target:
+                continue
+
+            # geometry
+            if hasattr(r, "polygon") and r.polygon:
+                pts = _poly_to_np(r.polygon)
+                u, w, area = _geom_from_polygon(pts)
             else:
-                # STRICT: exact match
-                if payload == target:
-                    chosen = r
-                    chosen_payload = payload
-                    break
+                rect = getattr(r, "rect", None)
+                if rect is None:
+                    continue
+                x, y, ww, hh = rect.left, rect.top, rect.width, rect.height
+                u = float(x + ww / 2.0)
+                w = float(max(ww, hh))
+                area = float(ww * hh)
 
-        if chosen is None:
-            self.miss_count += 1
-            return
+            if u is None or w is None or area is None:
+                continue
 
-        # Get polygon points if available, else fallback to rect
-        if hasattr(chosen, "polygon") and chosen.polygon:
-            pts = self._poly_to_np(chosen.polygon)
-        else:
-            # fallback to rect: left, top, width, height
-            rect = getattr(chosen, "rect", None)
-            if rect is None:
-                self.miss_count += 1
-                return
-            x, y, w, h = rect.left, rect.top, rect.width, rect.height
-            pts = np.array(
-                [[x, y], [x + w, y], [x + w, y + h], [x, y + h]],
-                dtype=np.float32
-            )
+            # choose the largest (most likely the target we're approaching)
+            if area > best_area:
+                best_area = area
+                best = r
+                best_u = u
+                best_w = w
+                best_data = data
 
-        u_center, w_px = self._geom_from_points(pts)
-        if u_center is None or w_px is None:
-            self.miss_count += 1
-            return
+        if best is None:
+            return None
 
-        # EMA smoothing
-        a = float(self.get_parameter('ema_alpha').value)
-        a = max(0.0, min(1.0, a))
+        return (best_u, best_w, best_data)
 
-        self.u_f = u_center if self.u_f is None else (1.0 - a) * self.u_f + a * u_center
-        self.w_f = w_px     if self.w_f is None else (1.0 - a) * self.w_f + a * w_px
-
-        # Save as last good (latched)
-        self.last_good_payload = chosen_payload
-        self.last_good_u = float(self.u_f)
-        self.last_good_w = float(self.w_f)
-        self.last_good_t = time.time()
-        self.miss_count = 0
-
-    def publish_tick(self):
-        """Publish at fixed rate; latch last_good for latch_sec."""
+    def tick(self):
         now = time.time()
-        latch_sec = float(self.get_parameter('latch_sec').value)
-        latch_sec = 0.0 if latch_sec < 0 else latch_sec
+        hold = float(self.get_parameter("valid_hold_sec").value)
+        if hold < 0:
+            hold = 0.0
 
-        valid = False
-        if self.last_good_payload is not None and (now - self.last_good_t) <= latch_sec:
-            valid = True
+        # process newest frame (if exists)
+        if self._latest_img_msg is not None and self._latest_seq != self._processed_seq:
+            self._processed_seq = self._latest_seq
 
-        # valid flag
+            try:
+                bgr = self.bridge.imgmsg_to_cv2(self._latest_img_msg, desired_encoding="bgr8")
+                gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+            except Exception as e:
+                self.get_logger().warn(f"cv_bridge/convert error: {e}")
+                gray = None
+
+            if gray is not None:
+                det = self._decode_qr_from_gray(gray)
+                if det is not None:
+                    u, w, data = det
+                    self._last_u = float(u)
+                    self._last_w = float(w)
+                    self._last_data = str(data)
+                    self._last_det_t = now
+
+        # publish (latched-valid behavior)
+        valid = (self._last_u is not None) and ((now - self._last_det_t) <= hold)
+
         vb = Bool()
         vb.data = bool(valid)
         self.pub_valid.publish(vb)
@@ -242,27 +232,17 @@ class QRDetectorNode(Node):
         if not valid:
             return
 
-        # publish u/w every tick (stable control)
         mu = Float32()
-        mu.data = float(self.last_good_u)
+        mu.data = float(self._last_u)
         self.pub_u.publish(mu)
 
         mw = Float32()
-        mw.data = float(self.last_good_w)
+        mw.data = float(self._last_w)
         self.pub_w.publish(mw)
 
-        # publish payload (optionally only on change)
-        payload = self.last_good_payload
-        only_on_change = bool(self.get_parameter('only_on_change').value)
-        if not (only_on_change and payload == self._last_payload_pub):
-            self._last_payload_pub = payload
-            s = String()
-            s.data = payload
-            self.pub_text.publish(s)
-#            self.get_logger().info(
-#                f"QR latched: '{payload}' | u={self.last_good_u:.1f}px w={self.last_good_w:.1f}px "
-#                f"(miss_count={self.miss_count})"
-#            )
+        ms = String()
+        ms.data = self._last_data
+        self.pub_data.publish(ms)
 
 
 def main():
@@ -273,5 +253,5 @@ def main():
     rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
