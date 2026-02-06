@@ -54,8 +54,8 @@ class MissionNavNode(Node):
         self.declare_parameter("frame_id", "map")
 
         # --- критерии “приехал” ---
-        self.declare_parameter("xy_tol_m", 0.18)
-        self.declare_parameter("yaw_tol_rad", 0.30)
+        self.declare_parameter("xy_tol_m", 0.25)
+        self.declare_parameter("yaw_tol_rad", 0.50)
         self.declare_parameter("stable_sec", 0.8)
         self.declare_parameter("nav_timeout_sec", 170.0)
 
@@ -69,7 +69,7 @@ class MissionNavNode(Node):
 
         # --- REST backend shelves coordinates ---
         self.declare_parameter("rest_enable", True)
-        self.declare_parameter("rest_base_url", "http://192.168.0.113:8080")  # на роботе будет IP ПК
+        self.declare_parameter("rest_base_url", "http://192.168.0.109:8080")  # на роботе будет IP ПК
         self.declare_parameter("rest_shelves_path", "/api/shelves")
         self.declare_parameter("rest_timeout_sec", 1.0)
 
