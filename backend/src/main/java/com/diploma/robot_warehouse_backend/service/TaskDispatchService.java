@@ -58,6 +58,7 @@ public class TaskDispatchService {
                 task.getTargetShelfCode(),
                 task.getTargetLevel(),
                 task.getTargetSide(),
+                slot.getApriltagId(),
                 shelf.getMapX(),
                 shelf.getMapY(),
                 shelf.getMapYaw()

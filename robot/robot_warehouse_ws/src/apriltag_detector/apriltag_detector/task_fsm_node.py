@@ -4,12 +4,10 @@ import threading
 import requests
 import rclpy
 from rclpy.node import Node
-
 from std_msgs.msg import Bool, Float32, String, Int32
 from geometry_msgs.msg import Vector3, Pose2D
 from sensor_msgs.msg import CameraInfo
 from std_srvs.srv import Trigger
-from geometry_msgs.msg import Vector3, Pose2D
 
 # Yahboom / Rosmaster
 try:
@@ -41,302 +39,57 @@ class TaskFSMNode(Node):
     """
 
     def __init__(self):
-        super().__init__("task_fsm_node")
+        super().__init__(
+            "task_fsm_node",
+            allow_undeclared_parameters=True,
+            automatically_declare_parameters_from_overrides=True
+        )
 
-        # ===== AprilTag ID filtering =====
-        # If enabled, the node will only consider AprilTag measurements whose id matches
-        # the tag id assigned to the current PICK shelf (pick_shelf_name) or PLACE shelf (place_shelf_name).
-        # Set shelf_A_tag_id / shelf_B_tag_id to your real AprilTag IDs (or keep -1 to accept any).
-        self.declare_parameter("use_tag_id_filter", True)
-        self.declare_parameter("tag_id_topic", "/tag/id")
-        self.declare_parameter("shelf_A_tag_id", 0)
-        self.declare_parameter("shelf_B_tag_id", 1)
-        self.declare_parameter("shelf_C_tag_id", 2)
-        
-
-        self.pub_pick_pose = self.create_publisher(Pose2D, "/mission/pick_pose2d", 10)
-        self.pub_place_pose = self.create_publisher(Pose2D, "/mission/place_pose2d", 10)
+        # Публикаторы
         self.pub_qr_target = self.create_publisher(String, "/qr/target", 10)
 
+        self.mission_nav_future = None
+        self.nav_start_t = None
 
+        # Состояние задачи
         self.current_task = None
         self.current_task_id = None
-        self.current_target_side = None   # "left"/"right"
-        self.current_target_level = None  # "UPPER"/"LOWER" (пока можно просто хранить)
+        self.current_target_side = None
+        self.current_target_level = None
+        self.current_target_apriltag_id = None
+        self.place_side = None
 
-        self.shelf_tag_id = {
-            "A": int(self.get_parameter("shelf_A_tag_id").value),
-            "B": int(self.get_parameter("shelf_B_tag_id").value),
-            "C": int(self.get_parameter("shelf_C_tag_id").value),
-        }
-
-
-        # timers / stamps
+        # Временные метки и состояние FSM
         self.state_enter_t = None
-
-        # shelf routing
-        self.current_shelf_id = None      # id тега текущего стеллажа (если нужно)
-        self.target_shelf_id = None       # куда едем ставить (другой стеллаж)
-
-        self.pick_shelf_name = "A"
-        self.place_shelf_name = "B"
-
-        # where we plan to place
-        self.place_side = None  # "left" or "right"
-
-        # ===== AprilTag approach params =====
-        self.declare_parameter("goal_z", 0.34)
-        self.declare_parameter("z_tolerance", 0.03)
-        self.declare_parameter("x_tolerance", 0.01)
-        self.declare_parameter("ang_tolerance", 0.03)
-
-        # IMPORTANT: compensates RGB camera optical axis offset to the right of the robot base center
-        self.declare_parameter("camera_offset_right_m", 0.020)
-
-        self.declare_parameter("k_ang", 0.6)
-        self.declare_parameter("k_x", 0.5)
-        self.declare_parameter("k_z", 0.35)
-
-        self.declare_parameter("max_vx", 0.12)
-        self.declare_parameter("max_vy", 0.25)
-        self.declare_parameter("max_vz", 0.80)
-
-        self.declare_parameter("min_vx", 0.015)
-        self.declare_parameter("min_vy", 0.004)
-        self.declare_parameter("min_vz", 0.020)
-
-        # ===== MCU motion PID (optional) =====
-        self.declare_parameter("use_motion_pid", True)
-        self.declare_parameter("motion_kp", 1.2)
-        self.declare_parameter("motion_ki", 0.25)
-        self.declare_parameter("motion_kd", 0.40)
-        self.declare_parameter("motion_pid_forever", False)
-
-        # ===== Pick anti-spam / re-arm =====
-        self.declare_parameter("rearm_lost_sec", 0.5)
-
-        # ===== QR focusing params =====
-        self.declare_parameter("tag_goal_z_pre_qr", 0.35)     # distance at which we stop Tag-approach and start QR focus
-        self.declare_parameter("pre_qr_z_margin", 0.03)       # allow a little margin to switch to QR
-
-        self.declare_parameter("pregrasp_wait", 2.0)          # hold time in QR-ready pose before pick
-
-        self.declare_parameter("qr_target_w_px", 170.0)       # target QR width at grasp distance (pixels)
-        self.declare_parameter("qr_u_tol_px", 25.0)
-        # Hysteresis: once centered, keep it centered until error exceeds this threshold
-        self.declare_parameter("qr_u_tol_exit_px", 35.0)
-        self.declare_parameter("qr_w_tol_px", 15.0)
-
-        self.declare_parameter("qr_k_y", 0.25)                # strafe gain (u-error)
-        self.declare_parameter("qr_k_x", 0.20)                # forward gain (w-error)
-
-        self.declare_parameter("qr_max_vy", 0.02)
-        self.declare_parameter("qr_max_vx", 0.04)
-        self.declare_parameter("qr_min_vy", 0.006)
-        self.declare_parameter("qr_min_vx", 0.006)
-
-        # Filter QR measurements to reduce jitter (same idea as in monolithic node)
-        self.declare_parameter("qr_u_alpha", 1)
-        self.declare_parameter("qr_w_alpha", 1)
-
-        # Low-pass for commanded velocities to reduce overshoot (0..1, higher = snappier)
-        self.declare_parameter("vel_alpha_tag", 0.0)   # было "как раньше"
-        self.declare_parameter("vel_alpha_qr", 0.1)   # сглаживание только для QR
-
-        self.declare_parameter("qr_timeout", 0.2)             # sec; qr must be updated recently
-        self.declare_parameter("qr_target_payload", "Lower shelf")     # "" accepts any payload, else strict match
-
-        # CameraInfo topic (same as in your monolithic version)
-        self.declare_parameter("camera_info_topic", "/camera/color/camera_info")
-
-        # ===== Geometry params (for full tag/QR fit in jaw) =====
-        self.declare_parameter("jaw_width", 0.05)  # gripper jaw width, m
-        self.declare_parameter("tag_size", 0.04)   # AprilTag size, m
-        self.declare_parameter("grasp_margin", 0.005)  # extra margin for tolerances, m (for AprilTag)
-        self.declare_parameter("qr_u_tol_margin_px", 5.0)  # extra pixel margin for QR tol
-
-        # ===== New params for back-off after pick =====
-        self.declare_parameter("back_off_distance", 0.45)  # m to back off after pick
-        self.declare_parameter("back_off_speed", 0.10)     # vx negative speed for back-off
-        self.declare_parameter("back_off_timeout", 13.0)    # max sec for back-off (safety)
-
-        # ===== New params for back-off after place =====
-        self.declare_parameter("place_back_off_speed", 0.10)  # vx negative speed after place
-        self.declare_parameter("place_back_off_sec", 2.0)     # sec to back off after place
-        self.declare_parameter("place_turn_speed", 0.6)       # vz speed for post-place turn
-        self.declare_parameter("place_turn_sec", 5.0)         # sec to turn after place
-        self.declare_parameter("place_release_timeout", 2.0)
-
-
-        # ===== New params for slot search on shelf =====
-        self.declare_parameter("slot_strafe_distance", 0.03)  # m to strafe to check slot
-        self.declare_parameter("slot_strafe_speed", 0.02)     # vy speed for strafe
-        self.declare_parameter("slot_qr_absent_sec", 0.6)     # sec without QR to consider slot free
-        self.declare_parameter("prefer_left_slot", True)      # start with left
-
-        # New param to invert strafe signs (if robot turns wrong way)
-        self.declare_parameter("left_strafe_sign", 1.0)  # -1.0 for negative vy = left, +1.0 to invert
-
-        # New param for slot QR check tol (to ignore off-center QR)
-        self.declare_parameter("slot_qr_u_tol_px", 50.0)  # if |u_err| > this, ignore QR (it's from other slot)
-
-        self.declare_parameter("arm_settle_after_pick_sec", 0.6)
-
-        # ===== REST backend (warehouse state) =====
-        self.declare_parameter("rest_enable", True)
-        self.declare_parameter("rest_base_url", "http://192.168.0.109:8080")  # поменяешь на IP ПК
-        self.declare_parameter("rest_timeout_sec", 0.6)
-        self.declare_parameter("rest_robot_id", "R1")
-        self.declare_parameter("rest_cube_qr_fallback", "UNKNOWN/UNKNOWN")
-
-        # ===== Task routing =====
-        self.declare_parameter("pick_shelf_code", "A")
-
-        # ===== Mission navigation =====
-        self.declare_parameter("use_mission_nav", True)
-        self.declare_parameter("mission_nav_pick_srv", "/mission/nav_pick")
-        self.declare_parameter("mission_nav_place_srv", "/mission/nav_place")
-        self.declare_parameter("mission_nav_retry_sec", 2.0)
-
-        self.use_mission_nav = bool(self.get_parameter("use_mission_nav").value)
-        self.mission_nav_pick_srv = str(self.get_parameter("mission_nav_pick_srv").value)
-        self.mission_nav_place_srv = str(self.get_parameter("mission_nav_place_srv").value)
-        self.mission_nav_retry_sec = float(self.get_parameter("mission_nav_retry_sec").value)
-
-        self.nav_pick_cli = self.create_client(Trigger, self.mission_nav_pick_srv)
-        self.nav_place_cli = self.create_client(Trigger, self.mission_nav_place_srv)
-
-        self.nav_future = None
-        self.nav_retry_until = 0.0
-
-        # ===== Read params =====
-        self.rest_enable = bool(self.get_parameter("rest_enable").value)
-        self.rest_base_url = str(self.get_parameter("rest_base_url").value).rstrip("/")
-        self.rest_timeout = float(self.get_parameter("rest_timeout_sec").value)
-        self.rest_robot_id = str(self.get_parameter("rest_robot_id").value)
-        self.rest_cube_qr_fallback = str(self.get_parameter("rest_cube_qr_fallback").value)
-        self.backend_cleared_once = False
-        self.pick_shelf_code = str(self.get_parameter("pick_shelf_code").value).strip().upper()
-        self.pick_shelf_name = self.pick_shelf_code
-
-        # Tag ID filtering
-        self.use_tag_id_filter = bool(self.get_parameter("use_tag_id_filter").value)
-        self.tag_id_topic = str(self.get_parameter("tag_id_topic").value)
-        self.shelf_tag_id = {
-            "A": int(self.get_parameter("shelf_A_tag_id").value),
-            "B": int(self.get_parameter("shelf_B_tag_id").value),
-        }
-
-        self.goal_z = float(self.get_parameter("goal_z").value)
-        self.z_tol = float(self.get_parameter("z_tolerance").value)
-        self.ang_tol = float(self.get_parameter("ang_tolerance").value)
-        self.cam_off = float(self.get_parameter("camera_offset_right_m").value)
-
-        self.k_ang = float(self.get_parameter("k_ang").value)
-        self.k_x = float(self.get_parameter("k_x").value)
-        self.k_z = float(self.get_parameter("k_z").value)
-
-        self.max_vx = float(self.get_parameter("max_vx").value)
-        self.max_vy = float(self.get_parameter("max_vy").value)
-        self.max_vz = float(self.get_parameter("max_vz").value)
-
-        self.min_vx = float(self.get_parameter("min_vx").value)
-        self.min_vy = float(self.get_parameter("min_vy").value)
-        self.min_vz = float(self.get_parameter("min_vz").value)
-
-        self.rearm_lost_sec = float(self.get_parameter("rearm_lost_sec").value)
-
-        # Geometry
-        self.jaw_width = float(self.get_parameter("jaw_width").value)
-        self.tag_size = float(self.get_parameter("tag_size").value)
-        self.jaw_half = self.jaw_width / 2.0
-        self.tag_half = self.tag_size / 2.0
-        self.grasp_margin = float(self.get_parameter("grasp_margin").value)
-        self.qr_u_tol_margin_px = float(self.get_parameter("qr_u_tol_margin_px").value)
-
-        # New place back-off
-        self.place_back_off_speed = float(self.get_parameter("place_back_off_speed").value)
-        self.place_back_off_sec = float(self.get_parameter("place_back_off_sec").value)
-        self.place_turn_speed = float(self.get_parameter("place_turn_speed").value)
-        self.place_turn_sec = float(self.get_parameter("place_turn_sec").value)
-        self.place_release_timeout = float(self.get_parameter("place_release_timeout").value)
-
-        # Grasp tol for AprilTag (in world meters)
-        self.grasp_x_tol = self.jaw_half - self.tag_half + self.grasp_margin
-
-        # New back-off
-        self.back_off_dist = float(self.get_parameter("back_off_distance").value)
-        self.back_off_speed = float(self.get_parameter("back_off_speed").value)
-        self.back_off_timeout = float(self.get_parameter("back_off_timeout").value)
-
-        # New slot search
-        self.slot_strafe_dist = float(self.get_parameter("slot_strafe_distance").value)
-        self.slot_strafe_speed = float(self.get_parameter("slot_strafe_speed").value)
-        self.slot_qr_absent_sec = float(self.get_parameter("slot_qr_absent_sec").value)
-        self.prefer_left = bool(self.get_parameter("prefer_left_slot").value)
-        self.left_strafe_sign = float(self.get_parameter("left_strafe_sign").value)
-        self.slot_qr_u_tol_px = float(self.get_parameter("slot_qr_u_tol_px").value)
-
-        # ===== Camera intrinsics (for QR u_target) =====
-        self.fx = None
-        self.cx = None
-
-        caminfo_topic = str(self.get_parameter("camera_info_topic").value)
-        self.create_subscription(CameraInfo, caminfo_topic, self.on_caminfo, 10)
-
-        # ===== State machine =====
         self.state = "WAIT"
 
-        self.mission_nav_future = None
-        self.nav_retry_until = 0.0
-
-        # latest tag data
+        # Последние данные сенсоров
         self.tag_seen = False
-        self.tag_id = None  # int
-        self.tag_t = None  # Vector3
-        self.tag_ang = None  # float
+        self.tag_id = None
+        self.tag_t = None
+        self.tag_ang = None
 
-        # latest qr data
         self.qr_valid = False
         self.qr_payload = None
         self.qr_u = None
         self.qr_w = None
         self.qr_last_t = 0.0
-        self.z_qr_ref = None
 
-        # filtered QR measurements
         self.qr_u_filt = None
         self.qr_w_filt = None
-
-        # centered latch for hysteresis
         self.qr_centered_latched = False
-
-        # QR hold timer (like qr_ready_since)
         self.qr_ready_since = None
 
-        # pick/place futures
-        self.pick_in_progress = False
-        self.pick_future = None
-        self.place_future = None
-
-        # rearm
-        self.rearm_seen_false_since = None
-
-        # arm status
+        # Статус манипулятора
         self.arm_busy = False
         self.arm_has_cube = False
 
-        # New for back-off
-        self.back_off_start_t = None
-        self.back_off_start_z = None
+        # Сглаживание скоростей
+        self.prev_vx = 0.0
+        self.prev_vy = 0.0
+        self.prev_vz = 0.0
 
-        # New for slot search
-        self.slot_side = None  # 'left' or 'right'
-        self.slot_strafe_start_t = None
-        self.slot_strafe_start_x = None
-        self.slot_checked_sides = set()  # to track checked sides
-
-        # ===== Base (Rosmaster) =====
+        # Подключение к Rosmaster
         self.car = None
         if Rosmaster is not None:
             try:
@@ -345,56 +98,139 @@ class TaskFSMNode(Node):
             except Exception as e:
                 self.get_logger().error(f"Rosmaster connect failed: {e}")
 
+        # Чтение всех параметров из yaml (или дефолты, если не найдены)
+        self._load_parameters()
+
         self.motion_pid_applied = False
         self._apply_mcu_motion_pid_once()
 
-        # command smoothing (like vel_alpha in monolithic node)
-        self.prev_vx = 0.0
-        self.prev_vy = 0.0
-        self.prev_vz = 0.0
+        # Подписки
+        self.create_subscription(CameraInfo, self.camera_info_topic, self.on_caminfo, 10)
 
-        # ===== Subscriptions (AprilTag detector) =====
         self.create_subscription(Bool, "/tag/seen", self.on_tag_seen, 10)
         self.create_subscription(Int32, self.tag_id_topic, self.on_tag_id, 10)
         self.create_subscription(Vector3, "/tag/pose_t", self.on_tag_pose, 10)
         self.create_subscription(Float32, "/tag/ang_err_normal", self.on_tag_ang, 10)
 
-        # ===== Subscriptions (QR detector) =====
         self.create_subscription(Bool, "/qr/valid", self.on_qr_valid, 10)
         self.create_subscription(Float32, "/qr/u", self.on_qr_u, 10)
         self.create_subscription(Float32, "/qr/w", self.on_qr_w, 10)
         self.create_subscription(String, "/qr/data", self.on_qr_data, 10)
 
-        # ===== ARM services =====
-        self.arm_pick = self.create_client(Trigger, "/arm/pick")
-        self.arm_place = self.create_client(Trigger, "/arm/place")
-
-        # ===== ARM status topics =====
         self.create_subscription(Bool, "/arm/busy", self.on_arm_busy, 10)
         self.create_subscription(Bool, "/arm/has_cube", self.on_arm_has_cube, 10)
 
-        # ===== Main loop =====
-        self.timer = self.create_timer(0.05, self.control_step)  # 20 Hz
-        self.get_logger().info("Task FSM started: tag-preqr -> qr-focus -> pick -> back-off -> place with slot search")
+        # Клиенты сервисов
+        self.arm_pick = self.create_client(Trigger, "/arm/pick")
+        self.arm_place = self.create_client(Trigger, "/arm/place")
+
+        self.nav_pick_cli = self.create_client(Trigger, self.mission_nav_pick_srv)
+        self.nav_place_cli = self.create_client(Trigger, self.mission_nav_place_srv)
+
+        # Таймер
+        self.timer = self.create_timer(0.05, self.control_step)
+
+        self.get_logger().info("Task FSM started")
+
+    def _load_parameters(self):
+        """Читает все необходимые параметры (загружены из yaml или берутся дефолты)"""
+        # AprilTag & topics
+        self.use_tag_id_filter = self.get_parameter_or("use_tag_id_filter", True).value
+        self.tag_id_topic = self.get_parameter_or("tag_id_topic", "/tag/id").value
+
+        # Camera & geometry
+        self.camera_info_topic = self.get_parameter_or("camera_info_topic", "/camera/color/camera_info").value
+        self.cam_off = self.get_parameter_or("camera_offset_right_m", 0.020).value
+        self.jaw_width = self.get_parameter_or("jaw_width", 0.05).value
+        self.tag_size = self.get_parameter_or("tag_size", 0.04).value
+        self.grasp_margin = self.get_parameter_or("grasp_margin", 0.005).value
+        self.qr_u_tol_margin_px = self.get_parameter_or("qr_u_tol_margin_px", 5.0).value
+
+        # AprilTag approach
+        self.goal_z = self.get_parameter_or("goal_z", 0.34).value
+        self.z_tol = self.get_parameter_or("z_tolerance", 0.03).value
+        self.ang_tol = self.get_parameter_or("ang_tolerance", 0.03).value
+        self.k_ang = self.get_parameter_or("k_ang", 0.6).value
+        self.k_x = self.get_parameter_or("k_x", 0.5).value
+        self.k_z = self.get_parameter_or("k_z", 0.35).value
+        self.max_vx = self.get_parameter_or("max_vx", 0.12).value
+        self.max_vy = self.get_parameter_or("max_vy", 0.25).value
+        self.max_vz = self.get_parameter_or("max_vz", 0.80).value
+        self.min_vx = self.get_parameter_or("min_vx", 0.015).value
+        self.min_vy = self.get_parameter_or("min_vy", 0.004).value
+        self.min_vz = self.get_parameter_or("min_vz", 0.020).value
+
+        # QR
+        self.tag_goal_z_pre_qr = self.get_parameter_or("tag_goal_z_pre_qr", 0.35).value
+        self.pre_qr_z_margin = self.get_parameter_or("pre_qr_z_margin", 0.03).value
+        self.pregrasp_wait = self.get_parameter_or("pregrasp_wait", 2.0).value
+        self.qr_target_w_px = self.get_parameter_or("qr_target_w_px", 170.0).value
+        self.qr_u_tol_px = self.get_parameter_or("qr_u_tol_px", 25.0).value
+        self.qr_u_tol_exit_px = self.get_parameter_or("qr_u_tol_exit_px", 35.0).value
+        self.qr_w_tol_px = self.get_parameter_or("qr_w_tol_px", 15.0).value
+        self.qr_k_y = self.get_parameter_or("qr_k_y", 0.25).value
+        self.qr_k_x = self.get_parameter_or("qr_k_x", 0.20).value
+        self.qr_max_vy = self.get_parameter_or("qr_max_vy", 0.02).value
+        self.qr_max_vx = self.get_parameter_or("qr_max_vx", 0.04).value
+        self.qr_min_vy = self.get_parameter_or("qr_min_vy", 0.006).value
+        self.qr_min_vx = self.get_parameter_or("qr_min_vx", 0.006).value
+        self.qr_u_alpha = self.get_parameter_or("qr_u_alpha", 1.0).value
+        self.qr_w_alpha = self.get_parameter_or("qr_w_alpha", 1.0).value
+        self.qr_timeout = self.get_parameter_or("qr_timeout", 0.2).value
+
+        # Сглаживание
+        self.vel_alpha_tag = self.get_parameter_or("vel_alpha_tag", 0.0).value
+        self.vel_alpha_qr = self.get_parameter_or("vel_alpha_qr", 0.1).value
+
+        # Back-off & timings
+        self.back_off_dist = self.get_parameter_or("back_off_distance", 0.45).value
+        self.back_off_speed = self.get_parameter_or("back_off_speed", 0.10).value
+        self.place_back_off_speed = self.get_parameter_or("place_back_off_speed", 0.10).value
+        self.place_back_off_sec = self.get_parameter_or("place_back_off_sec", 2.0).value
+        self.place_turn_speed = self.get_parameter_or("place_turn_speed", 0.6).value
+        self.place_turn_sec = self.get_parameter_or("place_turn_sec", 5.0).value
+        self.place_release_timeout = self.get_parameter_or("place_release_timeout", 2.0).value
+        self.arm_settle_after_pick_sec = self.get_parameter_or("arm_settle_after_pick_sec", 0.6).value
+
+        # REST
+        self.rest_enable = self.get_parameter_or("rest_enable", True).value
+        self.rest_base_url = self.get_parameter_or("rest_base_url", "http://192.168.0.109:8080").value.rstrip("/")
+        self.rest_timeout = self.get_parameter_or("rest_timeout_sec", 0.6).value
+        self.rest_robot_id = self.get_parameter_or("rest_robot_id", "robot1").value
+        self.rest_cube_qr_fallback = self.get_parameter_or("rest_cube_qr_fallback", "UNKNOWN/UNKNOWN").value
+
+        # Pick shelf fallback
+        self.pick_shelf_code = self.get_parameter_or("pick_shelf_code", "A").value.strip().upper()
+        self.pick_shelf_name = self.pick_shelf_code
+
+        # Mission nav
+        self.use_mission_nav = self.get_parameter_or("use_mission_nav", True).value
+        self.mission_nav_pick_srv = self.get_parameter_or("mission_nav_pick_srv", "/mission/nav_pick").value
+        self.mission_nav_place_srv = self.get_parameter_or("mission_nav_place_srv", "/mission/nav_place").value
+        self.mission_nav_retry_sec = self.get_parameter_or("mission_nav_retry_sec", 2.0).value
+
+        # Геометрия захвата
+        self.jaw_half = self.jaw_width / 2.0
+        self.tag_half = self.tag_size / 2.0
+        self.grasp_x_tol = self.jaw_half - self.tag_half + self.grasp_margin
 
     # -------------------- Tag ID filter helpers --------------------
     def _expected_tag_id_for_state(self):
-        """Return the required AprilTag id for the current state (or None if no filtering)."""
         if not self.use_tag_id_filter:
             return None
 
-        # During pick we want the tag of pick_shelf_name; during place we want tag of place_shelf_name.
         if self.state in ("FIND_TAG_FOR_PICK", "APPROACH_TAG_PREQR", "QR_FOCUS"):
-            shelf = self.pick_shelf_name
+            # Для pick — можно использовать фиксированный тег (параметр pick_tag_id)
+            pick_tag = self.get_parameter_or("pick_tag_id", -1).value
+            return pick_tag if pick_tag >= 0 else None
+
         elif self.state in ("FIND_TAG_FOR_PLACE", "APPROACH_TAG_FOR_PLACE"):
-            shelf = self.place_shelf_name
-        else:
+            if self.current_target_apriltag_id is not None and self.current_target_apriltag_id >= 0:
+                return self.current_target_apriltag_id
+            self.get_logger().warn("No valid targetApriltagId for PLACE → tag filtering off")
             return None
 
-        tid = int(self.shelf_tag_id.get(shelf, -1))
-        if tid < 0:
-            return None
-        return tid
+        return None
 
     # -------------------- CameraInfo --------------------
     def on_caminfo(self, msg: CameraInfo):
@@ -460,16 +296,16 @@ class TaskFSMNode(Node):
         if self.car is None or self.motion_pid_applied:
             return
 
-        use_pid = bool(self.get_parameter("use_motion_pid").value)
+        use_pid = bool(self.get_parameter_or("use_motion_pid", True).value)
         if not use_pid:
             self.motion_pid_applied = True
             self.get_logger().info("MCU motion PID disabled (use_motion_pid=False)")
             return
 
-        kp = float(self.get_parameter("motion_kp").value)
-        ki = float(self.get_parameter("motion_ki").value)
-        kd = float(self.get_parameter("motion_kd").value)
-        forever = bool(self.get_parameter("motion_pid_forever").value)
+        kp = float(self.get_parameter_or("motion_kp", 1.2).value)
+        ki = float(self.get_parameter_or("motion_ki", 0.25).value)
+        kd = float(self.get_parameter_or("motion_kd", 0.40).value)
+        forever = bool(self.get_parameter_or("motion_pid_forever", False).value)
 
         try:
             self.car.set_pid_param(kp, ki, kd, forever=forever)
@@ -527,7 +363,7 @@ class TaskFSMNode(Node):
             self._stop()
             if self._elapsed(now) >= float(self.get_parameter("arm_settle_after_pick_sec").value):
                 self._enter("BACK_OFF_2S", now)
-            return    
+            return
 
         if self.state == "BACK_OFF_AFTER_PLACE":
             self._send(-self.place_back_off_speed, 0.0, 0.0)
@@ -604,56 +440,66 @@ class TaskFSMNode(Node):
         # ======== NAVIGATION WAYPOINTS ========
         # ----------------------------
         if self.use_mission_nav and self.state == "NAV_TO_PICK_ZONE":
-            # Важно: здесь НЕ рулём базой через Rosmaster (только Nav2)
             if self.mission_nav_future is None:
-                if not self.nav_pick_cli.wait_for_service(timeout_sec=0.2):
-                    self.get_logger().warn("/mission/nav_pick not ready")
+                if not self.nav_pick_cli.wait_for_service(timeout_sec=1.0):
+                    self.get_logger().warn("/mission/nav_pick not ready → retry later")
                     return
-                self.get_logger().info("MissionNav: -> PICK zone")
+                self.get_logger().info("Requesting navigation to PICK zone")
                 self.mission_nav_future = self.nav_pick_cli.call_async(Trigger.Request())
-                return
+                self.nav_start_t = self._now_s()  # для таймаута
 
             if self.mission_nav_future.done():
                 try:
                     res = self.mission_nav_future.result()
-                    self.get_logger().info(f"MissionNav PICK: success={res.success} msg='{res.message}'")
-                    self.mission_nav_future = None
+                    self.get_logger().info(f"NAV_PICK result: success={res.success}, msg='{res.message}'")
                     if res.success:
                         self._enter("FIND_TAG_FOR_PICK", now)
                     else:
                         self._enter("WAIT", now)
                 except Exception as e:
-                    self.get_logger().error(f"MissionNav PICK error: {e}")
-                    self.mission_nav_future = None
+                    self.get_logger().error(f"NAV_PICK call failed: {e}")
                     self._enter("WAIT", now)
+                self.mission_nav_future = None
+                self.nav_start_t = None
+
+            # Таймаут навигации (опционально)
+            if self.nav_start_t is not None and (now - self.nav_start_t) > 180.0:
+                self.get_logger().error("Navigation to PICK timeout → aborting")
+                self.mission_nav_future = None
+                self.nav_start_t = None
+                self._enter("WAIT", now)
             return
 
 
         if self.use_mission_nav and self.state == "NAV_TO_PLACE_ZONE":
             if self.mission_nav_future is None:
-                if not self.nav_place_cli.wait_for_service(timeout_sec=0.2):
-                    self.get_logger().warn("/mission/nav_place not ready")
+                if not self.nav_place_cli.wait_for_service(timeout_sec=1.0):
+                    self.get_logger().warn("/mission/nav_place not ready → retry later")
                     return
-                self.get_logger().info("MissionNav: -> PLACE zone")
+                self.get_logger().info("Requesting navigation to PLACE zone")
                 self.mission_nav_future = self.nav_place_cli.call_async(Trigger.Request())
-                return
+                self.nav_start_t = self._now_s()
 
             if self.mission_nav_future.done():
                 try:
                     res = self.mission_nav_future.result()
-                    self.get_logger().info(f"MissionNav PLACE: success={res.success} msg='{res.message}'")
-                    self.mission_nav_future = None
+                    self.get_logger().info(f"NAV_PLACE result: success={res.success} msg='{res.message}'")
                     if res.success:
                         self._enter("FIND_TAG_FOR_PLACE", now)
                     else:
                         self._enter("WAIT", now)
                 except Exception as e:
-                    self.get_logger().error(f"MissionNav PLACE error: {e}")
-                    self.mission_nav_future = None
+                    self.get_logger().error(f"NAV_PLACE call failed: {e}")
                     self._enter("WAIT", now)
+                self.mission_nav_future = None
+                self.nav_start_t = None
+
+            if self.nav_start_t is not None and (now - self.nav_start_t) > 180.0:
+                self.get_logger().error("Navigation to PLACE timeout → aborting")
+                self.mission_nav_future = None
+                self.nav_start_t = None
+                self._enter("WAIT", now)
             return
-
-
 
         # ======== PICK ROUTE ========
         if self.state == "FIND_TAG_FOR_PICK":
@@ -885,7 +731,7 @@ class TaskFSMNode(Node):
                 except Exception as e:
                     self.get_logger().error(f"place future error: {e}")
                 self.place_future = None
-                
+
                 # после того как place сервис отработал и ты переходишь дальше:
                 observed_qr = self._normalize_observed_qr(self.qr_payload) or self._normalize_observed_qr(self.rest_cube_qr_fallback)
                 # успех считаем по факту: куб пропал из лапы (arm_has_cube False) — можно чуть позже, но для старта так
@@ -899,6 +745,7 @@ class TaskFSMNode(Node):
                 self.current_task_id = None
                 self.current_target_side = None
                 self.current_target_level = None
+                self.current_target_apriltag_id = None
 
                 self._enter("WAIT_PLACE_RELEASE", now)
             return
@@ -991,14 +838,8 @@ class TaskFSMNode(Node):
                 self.get_logger().warn(f"REST complete failed: {e}")
 
         threading.Thread(target=worker, daemon=True).start()
-    
+
     def _apply_task(self, task_json: dict):
-        """
-        task_json = TaskResponse:
-        taskId, sku, manufacturer,
-        targetShelfCode, targetLevel, targetSide,
-        targetX, targetY, targetYaw
-        """
         self.current_task = task_json
         self.current_task_id = int(task_json["taskId"])
         self.pick_shelf_name = self.pick_shelf_code
@@ -1011,19 +852,16 @@ class TaskFSMNode(Node):
         self.place_shelf_name = shelf_code
         self.current_target_level = level
         self.current_target_side = "left" if side == "LEFT" else "right"
-
-        # обновляем точку PLACE в MissionNavNode
-        p = Pose2D()
-        p.x = float(task_json["targetX"])
-        p.y = float(task_json["targetY"])
-        p.theta = float(task_json["targetYaw"])
-        self.pub_place_pose.publish(p)
+        raw = task_json.get("targetApriltagId", None)
+        try:
+            self.current_target_apriltag_id = int(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            self.current_target_apriltag_id = None
 
         self.get_logger().info(
             f"Task accepted: id={self.current_task_id} place={shelf_code} {side} {level} "
-            f"pose=({p.x:.2f},{p.y:.2f},{p.theta:.2f})"
         )
-        
+
         sku = str(task_json.get("sku", "")).strip()
         mfr = str(task_json.get("manufacturer", "")).strip()
         target_payload = f"{sku}/{mfr}".strip()
@@ -1034,17 +872,18 @@ class TaskFSMNode(Node):
 
         self.get_logger().info(f"QR target published: {target_payload}")
 
-
-    def _report_clear_to_backend(self, shelf_code: str, side_lr: str):
+    def _report_clear_to_backend(self, shelf_code: str, side_lr: str, level: str | None = None):
         """Send clear event to backend: /api/robot/clear"""
         if not shelf_code or not side_lr:
             return
 
         side_enum = "LEFT" if side_lr == "left" else "RIGHT"
+        level_enum = (level or self.current_target_level or "UPPER").strip().upper()
 
         payload = {
             "shelfCode": str(shelf_code).strip().upper(),
             "side": side_enum,
+            "level": level_enum,
             "robotId": self.rest_robot_id,
         }
 

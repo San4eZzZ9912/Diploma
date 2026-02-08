@@ -14,6 +14,7 @@ public class TaskResponse {
     private String targetShelfCode;
     private String targetLevel;
     private String targetSide;
+    private Integer targetApriltadId;
     private Double targetX;
     private Double targetY;
     private Double targetYaw;

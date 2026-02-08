@@ -19,4 +19,7 @@ public interface TaskRepository extends JpaRepository<Task, Integer> {
             limit 1
             """, nativeQuery = true)
     Optional<Task> findNextNewForUpdate();
+
+    Optional<Task> findFirstByRobotIdAndStatus(String robotId, Status status);
+
 }

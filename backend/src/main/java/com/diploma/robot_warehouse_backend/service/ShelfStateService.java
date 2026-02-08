@@ -1,14 +1,12 @@
 package com.diploma.robot_warehouse_backend.service;
 
-import com.diploma.robot_warehouse_backend.dto.ShelfCoordinatesResponse;
 import com.diploma.robot_warehouse_backend.dto.SlotStateResponse;
 import com.diploma.robot_warehouse_backend.entity.ShelfSlot;
-import com.diploma.robot_warehouse_backend.entity.Task;
 import com.diploma.robot_warehouse_backend.enums.Level;
 import com.diploma.robot_warehouse_backend.enums.Side;
 import com.diploma.robot_warehouse_backend.entity.SlotState;
 import com.diploma.robot_warehouse_backend.repository.ShelfSlotRepository;
-import com.diploma.robot_warehouse_backend.repository.ShelvesRepository;
+import com.diploma.robot_warehouse_backend.repository.ShelfRepository;
 import com.diploma.robot_warehouse_backend.repository.SlotStateRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,7 +19,7 @@ public class ShelfStateService {
     private final ShelfSlotRepository shelfSlotRepository;
     private final SlotStateRepository slotStateRepository;
 
-    public ShelfStateService(ShelfSlotRepository shelfSlotRepository, SlotStateRepository slotStateRepository, ShelvesRepository shelvesRepository) {
+    public ShelfStateService(ShelfSlotRepository shelfSlotRepository, SlotStateRepository slotStateRepository, ShelfRepository shelfRepository) {
         this.shelfSlotRepository = shelfSlotRepository;
         this.slotStateRepository = slotStateRepository;
     }
