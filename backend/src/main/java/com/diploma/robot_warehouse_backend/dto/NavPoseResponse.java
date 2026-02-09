@@ -10,5 +10,4 @@ public class NavPoseResponse {
     private Double mapX;
     private Double mapY;
     private Double mapYaw;
-    private Integer apriltagId;
 }
