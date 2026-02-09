@@ -1,0 +1,82 @@
+# config/task_fsm_params.yaml
+
+task_fsm_node:
+  ros__parameters:
+    # Общие настройки
+    use_tag_id_filter: true
+    tag_id_topic: "/tag/id"
+
+    # Камера и геометрия
+    camera_info_topic: "/camera/color/camera_info"
+    camera_offset_right_m: 0.020
+    jaw_width: 0.05
+    tag_size: 0.04
+    grasp_margin: 0.005
+    qr_u_tol_margin_px: 5.0
+
+    # Подход к AprilTag (общий)
+    goal_z: 0.34
+    z_tolerance: 0.03
+    ang_tolerance: 0.03
+    k_ang: 0.6
+    k_x: 0.5
+    k_z: 0.35
+    max_vx: 0.12
+    max_vy: 0.25
+    max_vz: 0.80
+    min_vx: 0.015
+    min_vy: 0.004
+    min_vz: 0.020
+
+    # Переход к QR и фокусировка QR
+    tag_goal_z_pre_qr: 0.35
+    pre_qr_z_margin: 0.03
+    pregrasp_wait: 2.0
+    qr_target_w_px: 170.0
+    qr_u_tol_px: 25.0
+    qr_u_tol_exit_px: 35.0
+    qr_w_tol_px: 15.0
+    qr_k_y: 0.25
+    qr_k_x: 0.20
+    qr_max_vy: 0.02
+    qr_max_vx: 0.04
+    qr_min_vy: 0.006
+    qr_min_vx: 0.006
+    qr_u_alpha: 1.0
+    qr_w_alpha: 1.0
+    qr_timeout: 0.2
+
+    # Сглаживание скоростей
+    vel_alpha_tag: 0.0
+    vel_alpha_qr: 0.1
+
+    # Отъезд после pick
+    back_off_distance: 0.45
+    back_off_speed: 0.10
+
+    # Отъезд и поворот после place
+    place_back_off_speed: 0.10
+    place_back_off_sec: 2.0
+    place_turn_speed: 0.6
+    place_turn_sec: 5.0
+    place_release_timeout: 2.0
+
+    # Ожидание после pick перед отъездом
+    arm_settle_after_pick_sec: 0.6
+
+    # Связь с backend
+    rest_enable: true
+    rest_base_url: "http://192.168.0.109:8080"
+    rest_timeout_sec: 0.6
+    rest_robot_id: "robot1"
+    rest_cube_qr_fallback: "UNKNOWN/UNKNOWN"
+
+    # Навигация
+    use_mission_nav: true
+    mission_nav_pick_srv: "/mission/nav_pick"
+    mission_nav_place_srv: "/mission/nav_place"
+    mission_nav_retry_sec: 2.0
+
+    # Фиксированный тег для PICK (если нужен)
+    pick_tag_id: 0   # -1 = отключить фильтрацию для PICK
+    pick_shelf_code: "A"

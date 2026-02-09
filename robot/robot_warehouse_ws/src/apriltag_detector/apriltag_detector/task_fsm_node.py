@@ -15,17 +15,14 @@ try:
 except Exception:
     Rosmaster = None
 
-
 def clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
-
 
 def signed_floor_abs(v: float, min_abs: float) -> float:
     """Guarantee a minimum absolute speed (deadband bypass) while keeping sign."""
     if abs(v) < 1e-9:
         return 0.0
     return math.copysign(max(abs(v), min_abs), v)
-
 
 class TaskFSMNode(Node):
     """
@@ -47,6 +44,10 @@ class TaskFSMNode(Node):
 
         # Публикаторы
         self.pub_qr_target = self.create_publisher(String, "/qr/target", 10)
+        self.pub_tag_target = self.create_publisher(Int32, "/tag/target_id", 10)
+        self._last_sent_tag_target = None
+
+        self._set_tag_target_id(-1)
 
         self.mission_nav_future = None
         self.nav_start_t = None
@@ -424,6 +425,7 @@ class TaskFSMNode(Node):
                     self._apply_task(t)
 
                 # задача есть — едем в pick-зону (A)
+                self._set_tag_target_id(-1)
                 self._enter("NAV_TO_PICK_ZONE", now) if self.use_mission_nav else self._enter("FIND_TAG_FOR_PICK", now)
                 return
 
@@ -664,7 +666,6 @@ class TaskFSMNode(Node):
             return
 
         # ======== PLACE ROUTE ========
-
         if self.state == "FIND_TAG_FOR_PLACE":
             self._stop()
             if tag_ok:
@@ -858,6 +859,11 @@ class TaskFSMNode(Node):
         except (TypeError, ValueError):
             self.current_target_apriltag_id = None
 
+        if self.current_target_apriltag_id is not None and self.current_target_apriltag_id >= 0:
+            self._set_tag_target_id(self.current_target_apriltag_id);
+        else:
+            self._set_tag_target_id(-1)
+
         self.get_logger().info(
             f"Task accepted: id={self.current_task_id} place={shelf_code} {side} {level} "
         )
@@ -957,9 +963,24 @@ class TaskFSMNode(Node):
     def _stop(self):
         self._send(0.0, 0.0, 0.0)
 
+    def _set_tag_target_id(self, tag_id: int):
+        """Publish desired AprilTag id for detector. -1 disables filtering."""
+        try:
+            tag_id = int(tag_id)
+        except Exception:
+            tag_id = -1
+
+        if self._last_sent_tag_target == tag_id:
+            return  # не спамим
+
+        m = Int32()
+        m.data = tag_id
+        self.pub_tag_target.publish(m)
+        self._last_sent_tag_target = tag_id
+        self.get_logger().info(f"Tag target id -> {tag_id}")
+
     def _now_s(self) -> float:
         return self.get_clock().now().nanoseconds * 1e-9
-
 
 def main():
     rclpy.init()
@@ -972,7 +993,6 @@ def main():
         node._stop()
         node.destroy_node()
         rclpy.shutdown()
-
 
 if __name__ == "__main__":
     main()
