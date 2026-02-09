@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta http-equiv="refresh" content="10">
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Задачи робота</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 32px; }
+        h2 { margin-top: 28px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 10px; border-bottom: 1px solid #e5e5e5; text-align: left; }
+        .badge { padding: 3px 8px; border-radius: 999px; border: 1px solid #ddd; font-size: 12px; }
+        .row { max-width: 1100px; }
+        .muted { color: #777; font-size: 13px; }
+    </style>
+</head>
+<body>
+<div class="row">
+    <h1>Задачи</h1>
+    <div class="muted">Показываю последние 50 в каждой категории</div>
+
+    <h2>Выполняются сейчас (IN_PROGRESS)</h2>
+    <table>
+        <thead>
+        <tr>
+            <th>ID</th><th>Robot</th><th>Товар</th><th>Куда</th><th>Статус</th><th>Updated</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:if="${#lists.isEmpty(inProgressTasks)}">
+            <td colspan="6" class="muted">Нет выполняемых задач</td>
+        </tr>
+        <tr th:each="t : ${inProgressTasks}">
+            <td th:text="${t.getId()}"></td>
+            <td th:text="${t.getRobotId()}"></td>
+            <td th:text="${t.getSku()} + '/' + ${t.getManufacturer()}"></td>
+            <td th:text="${t.getTargetShelfCode()} + ' ' + ${t.getTargetSide()} + ' ' + ${t.getTargetLevel()}"></td>
+            <td><span class="badge" th:text="${t.getStatus()}"></span></td>
+            <td th:text="${t.getUpdatedAt()}"></td>
+        </tr>
+        </tbody>
+    </table>
+
+    <h2>Новые (NEW)</h2>
+    <table>
+        <thead>
+        <tr>
+            <th>ID</th><th>Товар</th><th>Куда</th><th>Статус</th><th>Created</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:if="${#lists.isEmpty(newTasks)}">
+            <td colspan="5" class="muted">Нет новых задач</td>
+        </tr>
+        <tr th:each="t : ${newTasks}">
+            <td th:text="${t.getId()}"></td>
+            <td th:text="${t.getSku()} + '/' + ${t.getManufacturer()}"></td>
+            <td th:text="${t.getTargetShelfCode()} + ' ' + ${t.getTargetSide()} + ' ' + ${t.getTargetLevel()}"></td>
+            <td><span class="badge" th:text="${t.getStatus()}"></span></td>
+            <td th:text="${t.getCreatedAt()}"></td>
+        </tr>
+        </tbody>
+    </table>
+
+    <h2>Недавние (DONE / ERROR)</h2>
+    <table>
+        <thead>
+        <tr>
+            <th>ID</th><th>Robot</th><th>Товар</th><th>Куда</th><th>Статус</th><th>Updated</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:if="${#lists.isEmpty(recentTasks)}">
+            <td colspan="6" class="muted">Нет завершённых/ошибочных задач</td>
+        </tr>
+        <tr th:each="t : ${recentTasks}">
+            <td th:text="${t.getId()}"></td>
+            <td th:text="${t.getRobotId()}"></td>
+            <td th:text="${t.getSku()} + '/' + ${t.getManufacturer()}"></td>
+            <td th:text="${t.getTargetShelfCode()} + ' ' + ${t.getTargetSide()} + ' ' + ${t.getTargetLevel()}"></td>
+            <td><span class="badge" th:text="${t.getStatus()}"></span></td>
+            <td th:text="${t.getUpdatedAt()}"></td>
+        </tr>
+        </tbody>
+    </table>
+
+</div>
+</body>
+</html>
