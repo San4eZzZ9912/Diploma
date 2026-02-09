@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Загрузка номенклатуры</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .card { max-width: 520px; padding: 18px; border: 1px solid #ddd; border-radius: 12px; }
+        label { display:block; margin-top: 12px; }
+        input { width: 100%; padding: 10px; margin-top: 6px; }
+        button { margin-top: 16px; padding: 10px 14px; cursor: pointer; }
+        .ok { margin-top: 14px; color: #0a7a0a; }
+        .err { margin-top: 14px; color: #b00020; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h2>Импорт номенклатуры</h2>
+
+    <form th:action="@{/inbounds/upload}" method="post" enctype="multipart/form-data">
+        <label>Номер номенклатуры</label>
+        <input name="externalRef" placeholder="например 0000007"/>
+
+        <label>Файл номенклатуры (.txt)</label>
+        <input type="file" name="file" accept=".txt"/>
+
+        <button type="submit">Загрузить и импортировать</button>
+    </form>
+
+    <div class="ok" th:if="${ok}" th:text="${ok}"></div>
+    <div class="err" th:if="${error}" th:text="${error}"></div>
+</div>
+</body>
+</html>
