@@ -21,7 +21,7 @@ CREATE TABLE shelves (
     map_yaw DOUBLE PRECISION,
 
 	CONSTRAINT chk_role
-	CHECK (role IN ('PICK', 'STORAGE'))
+	CHECK (role IN ('PICK', 'STORAGE', 'DELIVERY'))
 );
 
 -- -------------------------
@@ -145,6 +145,7 @@ CREATE TABLE tasks (
     product_id      INTEGER NOT NULL,
 
     status   VARCHAR(16) NOT NULL DEFAULT 'NEW',
+	type 	 VARCHAR(16) NOT NULL DEFAULT 'PUTAWAY',
     robot_id VARCHAR(32),
 
     -- куда класть
@@ -168,6 +169,9 @@ CREATE TABLE tasks (
 		FOREIGN KEY (inbound_line_id)
 		REFERENCES inbound_lines (inbound_line_id)
 		ON DELETE RESTRICT
+
+	CONSTRAINT chk_type
+		CHECK (type in ('PUTAWAY','DELIVERY'))
 );
 
 CREATE INDEX idx_tasks_status       ON tasks(status);
@@ -179,21 +183,21 @@ CREATE INDEX idx_tasks_product      ON tasks(product_id);
 -- ============================================================
 INSERT INTO shelves (shelf_code, description, role)
 VALUES
-  ('A', 'Shelf A', 'PICK'),
-  ('B', 'Shelf B', 'STORAGE'),
-  ('C', 'Shelf C', 'STORAGE');
+  ('A', 'Shelf A', 'STORAGE'),
+  ('B', 'Shelf B', 'PICK'),
+  ('C', 'Shelf C', 'PICK');
 
 -- Example shelf coordinates
 UPDATE shelves SET map_x = 0.1,  map_y = -1.0, map_yaw = -1.57 WHERE shelf_code = 'A';
 UPDATE shelves SET map_x = -1.0, map_y = -1.0, map_yaw =  3.14 WHERE shelf_code = 'B';
-UPDATE shelves SET map_x = -1.0, map_y = 0.0, map_yaw =  3.14 WHERE shelf_code = 'C';
+UPDATE shelves SET map_x = -1.0, map_y = -1.0, map_yaw =  3.14 WHERE shelf_code = 'C';
 
 
 -- Create slots: A/B, LEFT/RIGHT, UPPER only
 INSERT INTO shelf_slots (shelf_code, side, level, apriltag_id, enabled)
 VALUES
   ('A', 'RIGHT', 'UPPER', 0, true),
-  ('A', 'LEFT', 'UPPER', 0, true),
+  ('A', 'RIGHT', 'UPPER', 0, true),
   ('B', 'RIGHT', 'UPPER', 1, true),
 
   ('B', 'LEFT',  'UPPER', 1, true),
@@ -211,5 +215,3 @@ SELECT slot_id, shelf_code, side, level, enabled FROM shelf_slots ORDER BY shelf
 SELECT ss.shelf_code, ss.side, ss.level, st.occupied, st.cube_qr, st.updated_at, st.robot_id
 FROM slot_state st JOIN shelf_slots ss ON ss.slot_id = st.slot_id
 ORDER BY ss.shelf_code, ss.side, ss.level;
-
-UPDATE tasks SET status = 'NEW' where task_id = 1;
