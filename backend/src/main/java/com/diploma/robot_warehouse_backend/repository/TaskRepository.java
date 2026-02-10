@@ -6,6 +6,7 @@ import org.hibernate.dialect.lock.OptimisticEntityLockException;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface TaskRepository extends JpaRepository<Task, Integer> {
@@ -22,4 +23,9 @@ public interface TaskRepository extends JpaRepository<Task, Integer> {
 
     Optional<Task> findFirstByRobotIdAndStatus(String robotId, Status status);
 
+    List<Task> findTop50ByStatusOrderByCreatedAtDesc(Status status);
+
+    List<Task> findTop50ByStatusOrderByUpdatedAtDesc(Status status);
+
+    List<Task> findTop50ByStatusInOrderByUpdatedAtDesc(List<Status> statuses);
 }
