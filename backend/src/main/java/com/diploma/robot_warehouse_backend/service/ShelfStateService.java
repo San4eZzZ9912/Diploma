@@ -10,7 +10,6 @@ import com.diploma.robot_warehouse_backend.repository.ShelfRepository;
 import com.diploma.robot_warehouse_backend.repository.SlotStateRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
 import java.time.LocalDateTime;
 import java.util.List;
 

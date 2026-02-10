@@ -2,7 +2,6 @@ package com.diploma.robot_warehouse_backend.repository;
 
 import com.diploma.robot_warehouse_backend.entity.Task;
 import com.diploma.robot_warehouse_backend.enums.Status;
-import org.hibernate.dialect.lock.OptimisticEntityLockException;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 

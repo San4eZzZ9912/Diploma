@@ -4,7 +4,6 @@ import com.diploma.robot_warehouse_backend.dto.ShelfCoordinatesResponse;
 import com.diploma.robot_warehouse_backend.repository.ShelfRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
 import java.util.List;
 
 @Service

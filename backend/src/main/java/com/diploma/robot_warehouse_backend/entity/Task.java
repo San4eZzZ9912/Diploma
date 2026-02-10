@@ -6,8 +6,6 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-import org.hibernate.cfg.Compatibility;
-
 import java.time.LocalDateTime;
 
 @Entity

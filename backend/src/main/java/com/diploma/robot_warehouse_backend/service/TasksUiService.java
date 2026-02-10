@@ -6,7 +6,6 @@ import com.diploma.robot_warehouse_backend.enums.Status;
 import com.diploma.robot_warehouse_backend.repository.TaskRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
 import java.util.List;
 
 @Service

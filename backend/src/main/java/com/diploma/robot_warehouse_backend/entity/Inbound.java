@@ -2,7 +2,6 @@ package com.diploma.robot_warehouse_backend.entity;
 
 import com.diploma.robot_warehouse_backend.enums.Status;
 import jakarta.persistence.*;
-import jakarta.persistence.criteria.CriteriaBuilder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;

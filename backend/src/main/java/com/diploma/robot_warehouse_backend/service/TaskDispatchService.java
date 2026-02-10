@@ -7,7 +7,6 @@ import com.diploma.robot_warehouse_backend.repository.SlotStateRepository;
 import com.diploma.robot_warehouse_backend.repository.TaskRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
-
 import java.time.LocalDateTime;
 import java.util.Optional;
 
