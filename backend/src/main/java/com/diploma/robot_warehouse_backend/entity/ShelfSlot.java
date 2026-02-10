@@ -16,7 +16,7 @@ public class ShelfSlot {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "slot_id")
-    private Integer Id;
+    private Integer id;
 
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)
