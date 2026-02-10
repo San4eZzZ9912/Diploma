@@ -1,10 +1,12 @@
 package com.diploma.robot_warehouse_backend.entity;
 
 import com.diploma.robot_warehouse_backend.enums.Status;
+import com.diploma.robot_warehouse_backend.enums.Type;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.cfg.Compatibility;
 
 import java.time.LocalDateTime;
 
@@ -22,6 +24,11 @@ public class Task {
     @Column(name = "status", nullable = false)
     @Setter
     private Status status;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "type", nullable = false)
+    @Setter
+    private Type type;
 
     @Column(name = "robot_id")
     @Setter
@@ -67,5 +74,6 @@ public class Task {
         this.inboundLine = inboundLine;
         this.product = product;
         this.createdAt = LocalDateTime.now();
+        this.type = Type.PUTAWAY;
     }
 }
