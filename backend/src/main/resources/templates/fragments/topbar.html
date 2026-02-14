@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<!-- topbar(activePage) -->
+<header class="topbar" th:fragment="topbar(activePage)">
+    <div class="brand">Warehouse UI</div>
+
+    <nav class="nav">
+        <a th:href="@{/inbounds/upload}"
+           th:classappend="${activePage}=='inbounds' ? ' active' : ''">
+            Импорт номенклатуры
+        </a>
+
+        <a th:href="@{/tasks}"
+           th:classappend="${activePage}=='tasks' ? ' active' : ''">
+            Задачи
+        </a>
+    </nav>
+</header>
+
+</body>
+</html>
