@@ -13,8 +13,10 @@
         .ok { margin-top: 14px; color: #0a7a0a; }
         .err { margin-top: 14px; color: #b00020; }
     </style>
+    <link rel="stylesheet" th:href="@{/css/app.css}">
 </head>
 <body>
+<div th:replace="~{fragments/topbar :: topbar('inbounds')}"></div>
 <div class="card">
     <h2>Импорт номенклатуры</h2>
 

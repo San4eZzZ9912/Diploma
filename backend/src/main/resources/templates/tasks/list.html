@@ -14,8 +14,10 @@
         .row { max-width: 1100px; }
         .muted { color: #777; font-size: 13px; }
     </style>
+    <link rel="stylesheet" th:href="@{/css/app.css}">
 </head>
 <body>
+<div th:replace="~{fragments/topbar :: topbar('tasks')}"></div>
 <div class="row">
     <h1>Задачи</h1>
     <div class="muted">Показываю последние 50 в каждой категории</div>

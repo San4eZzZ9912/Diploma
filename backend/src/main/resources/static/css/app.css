@@ -1,0 +1,13 @@
+/* Topbar (shared) */
+.topbar{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:12px 18px; border:1px solid #e5e5e5; border-radius:12px;
+  margin-bottom:18px; background:#fff;
+}
+.topbar .brand{ font-weight:700; }
+.topbar .nav a{
+  text-decoration:none; padding:8px 12px; border-radius:10px;
+  border:1px solid transparent; color:#111; margin-left:8px;
+}
+.topbar .nav a:hover{ border-color:#ddd; }
+.topbar .nav a.active{ border-color:#111; }
