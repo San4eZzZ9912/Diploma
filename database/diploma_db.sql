@@ -168,7 +168,7 @@ CREATE TABLE tasks (
 	CONSTRAINT fk_task_inbound
 		FOREIGN KEY (inbound_line_id)
 		REFERENCES inbound_lines (inbound_line_id)
-		ON DELETE RESTRICT
+		ON DELETE RESTRICT,
 
 	CONSTRAINT chk_type
 		CHECK (type in ('PUTAWAY','DELIVERY'))
@@ -183,21 +183,21 @@ CREATE INDEX idx_tasks_product      ON tasks(product_id);
 -- ============================================================
 INSERT INTO shelves (shelf_code, description, role)
 VALUES
-  ('A', 'Shelf A', 'STORAGE'),
-  ('B', 'Shelf B', 'PICK'),
-  ('C', 'Shelf C', 'PICK');
+  ('A', 'Shelf A', 'PICK'),
+  ('B', 'Shelf B', 'STORAGE'),
+  ('C', 'Shelf C', 'STORAGE');
 
 -- Example shelf coordinates
-UPDATE shelves SET map_x = 0.1,  map_y = -1.0, map_yaw = -1.57 WHERE shelf_code = 'A';
-UPDATE shelves SET map_x = -1.0, map_y = -1.0, map_yaw =  3.14 WHERE shelf_code = 'B';
-UPDATE shelves SET map_x = -1.0, map_y = -1.0, map_yaw =  3.14 WHERE shelf_code = 'C';
+UPDATE shelves SET map_x = 0.0, map_y = -0.5, map_yaw =  -3.14 WHERE shelf_code = 'A';
+UPDATE shelves SET map_x = 1.5,  map_y = 1.5, map_yaw = 3.14 WHERE shelf_code = 'B';
+UPDATE shelves SET map_x = 1.5,  map_y = 1.5, map_yaw = -3.14 WHERE shelf_code = 'C';
 
 
 -- Create slots: A/B, LEFT/RIGHT, UPPER only
 INSERT INTO shelf_slots (shelf_code, side, level, apriltag_id, enabled)
 VALUES
   ('A', 'RIGHT', 'UPPER', 0, true),
-  ('A', 'RIGHT', 'UPPER', 0, true),
+  ('A', 'LEFT',  'UPPER', 0, true),
   ('B', 'RIGHT', 'UPPER', 1, true),
 
   ('B', 'LEFT',  'UPPER', 1, true),
