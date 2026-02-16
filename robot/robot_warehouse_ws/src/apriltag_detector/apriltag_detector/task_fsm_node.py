@@ -8,6 +8,9 @@ from std_msgs.msg import Bool, Float32, String, Int32
 from geometry_msgs.msg import Vector3, Pose2D
 from sensor_msgs.msg import CameraInfo
 from std_srvs.srv import Trigger
+from rclpy.parameter import Parameter
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
+
 
 # Yahboom / Rosmaster
 try:
@@ -43,7 +46,14 @@ class TaskFSMNode(Node):
         )
 
         # Публикаторы
-        self.pub_qr_target = self.create_publisher(String, "/qr/target", 10)
+        qos_target = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+
+        self.pub_qr_target = self.create_publisher(String, "/qr/target", qos_target)
         self.pub_tag_target = self.create_publisher(Int32, "/tag/target_id", 10)
         self._last_sent_tag_target = None
 
@@ -75,6 +85,7 @@ class TaskFSMNode(Node):
         self.qr_u = None
         self.qr_w = None
         self.qr_last_t = 0.0
+        self.expected_qr = None
 
         self.qr_u_filt = None
         self.qr_w_filt = None
@@ -121,6 +132,8 @@ class TaskFSMNode(Node):
         self.create_subscription(Bool, "/arm/busy", self.on_arm_busy, 10)
         self.create_subscription(Bool, "/arm/has_cube", self.on_arm_has_cube, 10)
 
+        self.pub_arm_target_level = self.create_publisher(String, "/arm/target_level", 10)
+
         # Клиенты сервисов
         self.arm_pick = self.create_client(Trigger, "/arm/pick")
         self.arm_place = self.create_client(Trigger, "/arm/place")
@@ -148,7 +161,8 @@ class TaskFSMNode(Node):
         self.qr_u_tol_margin_px = self.get_parameter_or("qr_u_tol_margin_px", 5.0).value
 
         # AprilTag approach
-        self.goal_z = self.get_parameter_or("goal_z", 0.34).value
+        self.tag_goal_z_pre_qr_upper = self.get_parameter_or("tag_goal_z_pre_qr_upper", 0.36).value
+        self.tag_goal_z_pre_qr_lower = self.get_parameter_or("tag_goal_z_pre_qr_lower", 0.45).value
         self.z_tol = self.get_parameter_or("z_tolerance", 0.03).value
         self.ang_tol = self.get_parameter_or("ang_tolerance", 0.03).value
         self.k_ang = self.get_parameter_or("k_ang", 0.6).value
@@ -162,10 +176,12 @@ class TaskFSMNode(Node):
         self.min_vz = self.get_parameter_or("min_vz", 0.020).value
 
         # QR
-        self.tag_goal_z_pre_qr = self.get_parameter_or("tag_goal_z_pre_qr", 0.35).value
+        self.goal_z_upper = self.get_parameter_or("goal_z_upper", 0.34).value
+        self.goal_z_lower = self.get_parameter_or("goal_z_lower", 0.45).value
         self.pre_qr_z_margin = self.get_parameter_or("pre_qr_z_margin", 0.03).value
         self.pregrasp_wait = self.get_parameter_or("pregrasp_wait", 2.0).value
         self.qr_target_w_px = self.get_parameter_or("qr_target_w_px", 170.0).value
+        self.qr_target_w_px_lower = self.get_parameter_or("qr_target_w_px_lower", self.qr_target_w_px).value
         self.qr_u_tol_px = self.get_parameter_or("qr_u_tol_px", 25.0).value
         self.qr_u_tol_exit_px = self.get_parameter_or("qr_u_tol_exit_px", 35.0).value
         self.qr_w_tol_px = self.get_parameter_or("qr_w_tol_px", 15.0).value
@@ -196,7 +212,7 @@ class TaskFSMNode(Node):
         # REST
         self.rest_enable = self.get_parameter_or("rest_enable", True).value
         self.rest_base_url = self.get_parameter_or("rest_base_url", "http://192.168.0.109:8080").value.rstrip("/")
-        self.rest_timeout = self.get_parameter_or("rest_timeout_sec", 0.6).value
+        self.rest_timeout = self.get_parameter_or("rest_timeout_sec", 1.5).value
         self.rest_robot_id = self.get_parameter_or("rest_robot_id", "robot1").value
         self.rest_cube_qr_fallback = self.get_parameter_or("rest_cube_qr_fallback", "UNKNOWN/UNKNOWN").value
 
@@ -315,12 +331,23 @@ class TaskFSMNode(Node):
         except Exception as e:
             self.get_logger().warn(f"MCU motion PID set failed: {e}")
 
+    def _is_lower_level(self) -> bool:
+        return str(self.current_target_level).strip().upper() == "LOWER"
+
+    def _pre_qr_goal_z(self) -> float:
+        return float(self.tag_goal_z_pre_qr_lower if self._is_lower_level() else self.tag_goal_z_pre_qr_upper)
+
+    def _place_goal_z(self) -> float:
+        return float(self.goal_z_lower if self._is_lower_level() else self.goal_z_upper)
+
+
     # -------------------- Main FSM loop --------------------
     def _enter(self, new_state: str, now: float):
         if self.state != new_state:
             self.state = new_state
             self.state_enter_t = now
             self.get_logger().info(f"FSM -> {new_state}")
+            self._sync_tag_target_for_state()   # <-- ВАЖНО
         if new_state in ("NAV_TO_PICK_ZONE", "NAV_TO_PLACE_ZONE"):
             self.mission_nav_future = None
 
@@ -331,7 +358,6 @@ class TaskFSMNode(Node):
 
     def control_step(self):
         now = self._now_s()
-
         # ----------------------------
         # 0) State init
         # ----------------------------
@@ -370,16 +396,16 @@ class TaskFSMNode(Node):
             self._send(-self.place_back_off_speed, 0.0, 0.0)
             if self._elapsed(now) >= self.place_back_off_sec:
                 self._stop()
-                self._enter("NAV_TO_PICK_ZONE", now) if self.use_mission_nav else self._enter("FIND_TAG_FOR_PICK", now)
+                self._enter("WAIT", now)
             return
 
 
-        if self.state == "TURN_AFTER_PLACE":
-            self._send(0.0, 0.0, self.place_turn_speed)
-            if self._elapsed(now) >= self.place_turn_sec:
-                self._stop()
-                self._enter("FIND_TAG_FOR_PICK", now)
-            return
+        #if self.state == "TURN_AFTER_PLACE":
+        #self._send(0.0, 0.0, self.place_turn_speed)
+        #if self._elapsed(now) >= self.place_turn_sec:
+        #    self._stop()
+        #    self._enter("FIND_TAG_FOR_PICK", now)
+        #return
 
         # ----------------------------
         # 2) If arm is moving - generally stop
@@ -408,7 +434,11 @@ class TaskFSMNode(Node):
         # QR freshness
         qr_timeout = float(self.get_parameter("qr_timeout").value)
         qr_alive = (now - self.qr_last_t) <= qr_timeout
-        qr_ok = qr_alive and self.qr_valid and (self.qr_u is not None) and (self.qr_w is not None)
+
+        observed = self._normalize_observed_qr(self.qr_payload)
+        payload_ok = (self.expected_qr is None) or (observed == self.expected_qr)
+
+        qr_ok = qr_alive and self.qr_valid and (self.qr_u is not None) and (self.qr_w is not None) and payload_ok
 
         # ----------------------------
         # 4) Main FSM
@@ -472,7 +502,6 @@ class TaskFSMNode(Node):
                 self._enter("WAIT", now)
             return
 
-
         if self.use_mission_nav and self.state == "NAV_TO_PLACE_ZONE":
             if self.mission_nav_future is None:
                 if not self.nav_place_cli.wait_for_service(timeout_sec=1.0):
@@ -507,6 +536,9 @@ class TaskFSMNode(Node):
         if self.state == "FIND_TAG_FOR_PICK":
             # просто ждём появления метки (нужного ID)
             self._stop()
+            if self.current_task is None:
+                self._enter("WAIT", now)
+                return
             if tag_ok:
                 self._enter("APPROACH_TAG_PREQR", now)
             return
@@ -517,7 +549,7 @@ class TaskFSMNode(Node):
                 self._enter("FIND_TAG_FOR_PICK", now)
                 return
 
-            pre_goal = float(self.get_parameter("tag_goal_z_pre_qr").value)
+            pre_goal = self._pre_qr_goal_z()
             pre_margin = float(self.get_parameter("pre_qr_z_margin").value)
 
             z_err_pre = z - pre_goal
@@ -530,11 +562,18 @@ class TaskFSMNode(Node):
                 # теперь "забываем про метку" и работаем по QR
                 self.qr_ready_since = None
                 self.qr_centered_latched = False
+
+                # сброс "последнего QR" в FSM, чтобы первые 1-2 тика не ехали по мусору
+                self.qr_valid = False
+                self.qr_payload = None
+                self.qr_u = None
+                self.qr_w = None
+                self.qr_last_t = 0.0
                 self._enter("QR_FOCUS", now)
             return
 
         if self.state == "QR_FOCUS":
-            pre_goal = float(self.get_parameter("tag_goal_z_pre_qr").value)
+            pre_goal = self._pre_qr_goal_z()
 
             # Если QR временно потеряли:
             if not qr_ok:
@@ -568,7 +607,10 @@ class TaskFSMNode(Node):
 
             u_err = float(self.qr_u) - float(u_target)
 
-            w_target = float(self.get_parameter("qr_target_w_px").value)
+            if getattr(self, "current_pick_level", "UPPER") == "LOWER":
+                w_target = float(self.qr_target_w_px_lower)
+            else:
+                w_target = float(self.qr_target_w_px)
             w_err = w_target - float(self.qr_w)
             w_tol = float(self.get_parameter("qr_w_tol_px").value)
 
@@ -678,7 +720,7 @@ class TaskFSMNode(Node):
                 self._enter("FIND_TAG_FOR_PLACE", now)
                 return
 
-            z_err = z - self.goal_z
+            z_err = z - self._place_goal_z()
             vx, vy, vz = self._tag_control(x_err=x_err, z_err=z_err, ang=ang)
             self._send(vx, vy, vz)
 
@@ -719,6 +761,11 @@ class TaskFSMNode(Node):
             if not self.arm_place.wait_for_service(timeout_sec=0.2):
                 self.get_logger().warn("/arm/place not ready")
                 return
+
+            lvl = String()
+            lvl.data = str(self.current_target_level or "UPPER")
+            self.pub_arm_target_level.publish(lvl)
+
             self.place_future = self.arm_place.call_async(Trigger.Request())
             self._enter("WAIT_PLACE_DONE", now)
             return
@@ -747,6 +794,14 @@ class TaskFSMNode(Node):
                 self.current_target_side = None
                 self.current_target_level = None
                 self.current_target_apriltag_id = None
+
+                # сбрасываем qr ожидания, чтобы не держать старую задачу
+                self.expected_qr = None
+
+                # если у тебя в QRDetector require_target=True — можно явно очистить target
+                m = String()
+                m.data = ""
+                self.pub_qr_target.publish(m)
 
                 self._enter("WAIT_PLACE_RELEASE", now)
             return
@@ -785,6 +840,10 @@ class TaskFSMNode(Node):
                 self.get_logger().warn(f"REST {path} failed: {e}")
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _sync_tag_target_for_state(self):
+        exp = self._expected_tag_id_for_state()
+        self._set_tag_target_id(exp if exp is not None else -1)
 
     def _fetch_next_task(self):
         """GET /api/robot/tasks/next?robotId=R1 -> dict or None (if 204)"""
@@ -871,29 +930,13 @@ class TaskFSMNode(Node):
         sku = str(task_json.get("sku", "")).strip()
         mfr = str(task_json.get("manufacturer", "")).strip()
         target_payload = f"{sku}/{mfr}".strip()
+        self.expected_qr = self._normalize_observed_qr(target_payload)
 
         msg = String()
         msg.data = target_payload
         self.pub_qr_target.publish(msg)
 
         self.get_logger().info(f"QR target published: {target_payload}")
-
-    def _report_clear_to_backend(self, shelf_code: str, side_lr: str, level: str | None = None):
-        """Send clear event to backend: /api/robot/clear"""
-        if not shelf_code or not side_lr:
-            return
-
-        side_enum = "LEFT" if side_lr == "left" else "RIGHT"
-        level_enum = (level or self.current_target_level or "UPPER").strip().upper()
-
-        payload = {
-            "shelfCode": str(shelf_code).strip().upper(),
-            "side": side_enum,
-            "level": level_enum,
-            "robotId": self.rest_robot_id,
-        }
-
-        self._rest_post_async("/api/robot/clear", payload)
 
     # -------------------- Controllers --------------------
     def _tag_control(self, x_err: float, z_err: float, ang: float):
