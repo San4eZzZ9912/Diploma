@@ -188,9 +188,9 @@ VALUES
   ('C', 'Shelf C', 'STORAGE');
 
 -- Example shelf coordinates
-UPDATE shelves SET map_x = 0.0, map_y = -0.5, map_yaw =  -3.14 WHERE shelf_code = 'A';
-UPDATE shelves SET map_x = 1.5,  map_y = 1.5, map_yaw = 3.14 WHERE shelf_code = 'B';
-UPDATE shelves SET map_x = 1.5,  map_y = 1.5, map_yaw = -3.14 WHERE shelf_code = 'C';
+UPDATE shelves SET map_x = 0.0, map_y = 0.7, map_yaw =  3.14 WHERE shelf_code = 'A';
+UPDATE shelves SET map_x = 1.5,  map_y = -1.5, map_yaw = 0 WHERE shelf_code = 'B';
+UPDATE shelves SET map_x = 1.5,  map_y = -1.5, map_yaw = 3.14 WHERE shelf_code = 'C';
 
 
 -- Create slots: A/B, LEFT/RIGHT, UPPER only
@@ -198,9 +198,13 @@ INSERT INTO shelf_slots (shelf_code, side, level, apriltag_id, enabled)
 VALUES
   ('A', 'RIGHT', 'UPPER', 0, true),
   ('A', 'LEFT',  'UPPER', 0, true),
-  ('B', 'RIGHT', 'UPPER', 1, true),
 
+  ('B', 'RIGHT', 'UPPER', 1, true),
   ('B', 'LEFT',  'UPPER', 1, true),
+
+  ('B', 'RIGHT', 'LOWER', 1, true),
+  ('B', 'LEFT',  'LOWER', 1, true),
+
   ('C', 'RIGHT', 'UPPER', 2, true),
   ('C', 'LEFT',  'UPPER', 2, true);
 
