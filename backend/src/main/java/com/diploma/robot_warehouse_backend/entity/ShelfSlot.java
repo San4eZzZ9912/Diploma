@@ -39,5 +39,4 @@ public class ShelfSlot {
     @ManyToOne(optional = false, fetch = FetchType.LAZY)
     @JoinColumn(name = "shelf_code", referencedColumnName = "shelf_code", nullable = false)
     private Shelf shelf;
-
 }

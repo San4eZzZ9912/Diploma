@@ -1,0 +1,135 @@
+package com.diploma.robot_warehouse_backend.service;
+
+import com.diploma.robot_warehouse_backend.dto.DeliveryTaskResponse;
+import com.diploma.robot_warehouse_backend.entity.*;
+import com.diploma.robot_warehouse_backend.enums.Role;
+import com.diploma.robot_warehouse_backend.enums.Status;
+import com.diploma.robot_warehouse_backend.enums.Type;
+import com.diploma.robot_warehouse_backend.repository.ShelfRepository;
+import com.diploma.robot_warehouse_backend.repository.SlotStateRepository;
+import com.diploma.robot_warehouse_backend.repository.TaskRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.Optional;
+
+@Service
+public class DeliveryDispatchService {
+    public final TaskRepository taskRepository;
+    public final SlotStateRepository slotStateRepository;
+    public final ShelfRepository shelfRepository;
+
+    public DeliveryDispatchService(TaskRepository taskRepository, SlotStateRepository slotStateRepository, ShelfRepository shelfRepository) {
+        this.taskRepository = taskRepository;
+        this.slotStateRepository = slotStateRepository;
+        this.shelfRepository = shelfRepository;
+    }
+
+    @Transactional
+    public Optional<DeliveryTaskResponse> getNextDeliveryTask(String robotId) {
+        Task task = taskRepository.findNextNewDeliveryForUpdate().orElse(null);
+        if (task == null) return Optional.empty();
+
+        Product product = task.getProduct();
+        String cubeQr = buildCubeQr(product.getSku(), product.getManufacturer());
+
+        SlotState occupied = slotStateRepository
+                .findFirstOccupiedStorageByCubeQrForUpdate(cubeQr)
+                .orElse(null);
+
+        if (occupied == null) {
+            return Optional.empty();
+        }
+
+        ShelfSlot sourceSlot = occupied.getSlot();
+        Shelf sourceShelf = sourceSlot.getShelf();
+
+        Shelf deliveryShelf = shelfRepository.findFirstByRole(Role.DELIVERY).orElseThrow(() -> new IllegalArgumentException("DELIVERY shelf not found"));
+
+        occupied.setReserved(true);
+        occupied.setReservedTaskId(task.getId());
+        occupied.setUpdatedAt(LocalDateTime.now());
+
+        task.setType(Type.DELIVERY);
+        task.setStatus(Status.IN_PROGRESS);
+        task.setRobotId(robotId);
+        task.setSourceSlot(sourceSlot);
+        task.setUpdatedAt(LocalDateTime.now());
+
+        slotStateRepository.save(occupied);
+        taskRepository.save(task);
+
+        DeliveryTaskResponse deliveryTaskResponse = new DeliveryTaskResponse(
+                task.getId(),
+                task.getType(),
+                product.getSku(),
+                product.getManufacturer(),
+
+                sourceSlot.getId(),
+                sourceShelf.getShelfCode(),
+                sourceSlot.getLevel(),
+                sourceSlot.getSide(),
+                sourceSlot.getApriltagId(),
+
+                sourceShelf.getMapX(),
+                sourceShelf.getMapY(),
+                sourceShelf.getMapYaw(),
+
+                deliveryShelf.getShelfCode(),
+                deliveryShelf.getMapX(),
+                deliveryShelf.getMapY(),
+                deliveryShelf.getMapYaw()
+        );
+
+        return Optional.of(deliveryTaskResponse);
+    }
+
+    @Transactional
+    public void completeDeliveryTask(Integer taskId, String robotId, boolean success) {
+        Task task = taskRepository.findById(taskId).orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
+
+        if (task.getType() != Type.DELIVERY) {
+            throw new IllegalStateException("Task is not DELIVERY: " + taskId + ", type=" + task.getType());
+        }
+        if (!Status.IN_PROGRESS.equals(task.getStatus())) {
+            throw new IllegalStateException("Task is not IN_PROGRESS: " + taskId + ", status=" + task.getStatus());
+        }
+        if (task.getRobotId() != null && !task.getRobotId().equals(robotId)) {
+            throw new IllegalStateException("Task is owned by another robot: taskRobot=" + task.getRobotId() + ", robotId=" + robotId);
+        }
+
+        ShelfSlot sourceSlot = task.getSourceSlot();
+        if (sourceSlot == null) {
+            throw new IllegalStateException("DELIVERY task has no sourceSlot: taskId=" + taskId);
+        }
+
+        SlotState sourceState = slotStateRepository.findById(sourceSlot.getId()).orElseThrow(
+                () -> new IllegalArgumentException("slot_state not found for slotId=" + sourceSlot.getId())
+        );
+
+        sourceState.setReserved(false);
+        sourceState.setReservedTaskId(null);
+        sourceState.setUpdatedAt(LocalDateTime.now());
+        sourceState.setRobotId(robotId);
+
+        if (success) {
+            sourceState.setOccupied(false);
+
+            sourceState.setCubeQr(null);
+            task.setStatus(Status.DONE);
+        } else {
+            task.setStatus(Status.ERROR);
+        }
+
+        task.setUpdatedAt(LocalDateTime.now());
+
+        slotStateRepository.save(sourceState);
+        taskRepository.save(task);
+    }
+
+    private String buildCubeQr(String sku, String manufacturer) {
+        if (sku == null || manufacturer == null) return null;
+        return sku.trim() + "/" + manufacturer.trim();
+    }
+}

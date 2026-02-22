@@ -9,6 +9,5 @@ import java.util.Optional;
 @Repository
 public interface ShelfRepository extends JpaRepository<Shelf, Integer> {
     Optional<Shelf> findFirstByRole(Role role); // или enum ShelfRole
-    Optional<Shelf> findByShelfCode(String shelfCode);
 
 }

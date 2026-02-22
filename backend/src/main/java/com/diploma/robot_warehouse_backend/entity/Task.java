@@ -32,18 +32,6 @@ public class Task {
     @Setter
     private String robotId;
 
-    @Column(name = "target_shelf_code")
-    @Setter
-    private String targetShelfCode;
-
-    @Column(name = "target_level")
-    @Setter
-    private String targetLevel;
-
-    @Column(name = "target_side")
-    @Setter
-    private String targetSide;
-
     @Column(name = "observed_sku")
     @Setter
     private String observedSku;
@@ -66,6 +54,16 @@ public class Task {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "product_id", nullable = false)
     private Product product;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "source_slot_id")
+    @Setter
+    private ShelfSlot sourceSlot;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "target_slot_id")
+    @Setter
+    private ShelfSlot targetSlot;
 
     public Task(Status status, InboundLine inboundLine, Product product) {
         this.status = status;

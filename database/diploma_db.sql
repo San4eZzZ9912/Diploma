@@ -141,17 +141,14 @@ CREATE INDEX idx_inbound_lines_status   ON inbound_lines(status);
 CREATE TABLE tasks (
     task_id SERIAL PRIMARY KEY,
 
+	source_slot_id INTEGER,
+	target_slot_id INTEGER,
 	inbound_line_id INTEGER NOT NULL,
     product_id      INTEGER NOT NULL,
 
     status   VARCHAR(16) NOT NULL DEFAULT 'NEW',
 	type 	 VARCHAR(16) NOT NULL DEFAULT 'PUTAWAY',
     robot_id VARCHAR(32),
-
-    -- куда класть
-    target_shelf_code VARCHAR(10),
-    target_level      VARCHAR(16),
-    target_side 	  VARCHAR(8),
 
     -- что ожидали / что увидели
     observed_sku 	      VARCHAR(64),
@@ -170,6 +167,16 @@ CREATE TABLE tasks (
 		REFERENCES inbound_lines (inbound_line_id)
 		ON DELETE RESTRICT,
 
+	CONSTRAINT fk_task_source_slot
+		FOREIGN KEY (source_slot_id)
+		REFERENCES shelf_slots (slot_id)
+		ON DELETE RESTRICT,
+
+	CONSTRAINT fk_task_target_slot
+		FOREIGN KEY (target_slot_id)
+		REFERENCES shelf_slots (slot_id)
+		ON DELETE RESTRICT,
+
 	CONSTRAINT chk_type
 		CHECK (type in ('PUTAWAY','DELIVERY'))
 );
@@ -183,9 +190,9 @@ CREATE INDEX idx_tasks_product      ON tasks(product_id);
 -- ============================================================
 INSERT INTO shelves (shelf_code, description, role)
 VALUES
-  ('A', 'Shelf A', 'PICK'),
+  ('A', 'Pick point', 'PICK'),
   ('B', 'Shelf B', 'STORAGE'),
-  ('C', 'Shelf C', 'STORAGE');
+  ('C', 'Delivery point', 'DELIVERY');
 
 -- Example shelf coordinates
 UPDATE shelves SET map_x = 0.0, map_y = 0.7, map_yaw =  3.14 WHERE shelf_code = 'A';
@@ -219,3 +226,54 @@ SELECT slot_id, shelf_code, side, level, enabled FROM shelf_slots ORDER BY shelf
 SELECT ss.shelf_code, ss.side, ss.level, st.occupied, st.cube_qr, st.updated_at, st.robot_id
 FROM slot_state st JOIN shelf_slots ss ON ss.slot_id = st.slot_id
 ORDER BY ss.shelf_code, ss.side, ss.level;
+
+-- =========================================
+--  Добавляем новые колонки
+-- =========================================
+ALTER TABLE tasks
+ADD COLUMN IF NOT EXISTS source_slot_id INTEGER,
+ADD COLUMN IF NOT EXISTS target_slot_id INTEGER;
+
+-- =========================================
+--  Заполняем target_slot_id
+--    на основе target_shelf_code + side + level
+-- =========================================
+UPDATE tasks t
+SET target_slot_id = ss.slot_id
+FROM shelf_slots ss
+WHERE ss.shelf_code = t.target_shelf_code
+  AND ss.side = t.target_side
+  AND ss.level = t.target_level
+  AND t.target_slot_id IS NULL;
+
+-- =========================================
+-- Добавляем внешние ключи
+-- =========================================
+ALTER TABLE tasks
+ADD CONSTRAINT fk_task_source_slot
+FOREIGN KEY (source_slot_id)
+REFERENCES shelf_slots(slot_id)
+ON DELETE RESTRICT;
+
+ALTER TABLE tasks
+ADD CONSTRAINT fk_task_target_slot
+FOREIGN KEY (target_slot_id)
+REFERENCES shelf_slots(slot_id)
+ON DELETE RESTRICT;
+
+-- =========================================
+-- Удаляем старые поля (если всё прошло успешно)
+-- =========================================
+ALTER TABLE tasks
+DROP COLUMN IF EXISTS target_shelf_code,
+DROP COLUMN IF EXISTS target_level,
+DROP COLUMN IF EXISTS target_side;
+
+ALTER TABLE slot_state
+  ADD COLUMN product_id INTEGER;
+
+ALTER TABLE slot_state
+  ADD CONSTRAINT fk_slot_state_product
+  FOREIGN KEY (product_id) REFERENCES products(product_id);
+
+CREATE INDEX idx_slot_state_product ON slot_state(product_id);

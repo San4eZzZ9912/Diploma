@@ -1,8 +1,11 @@
 package com.diploma.robot_warehouse_backend.controller;
 
+import com.diploma.robot_warehouse_backend.dto.DeliveryTaskResponse;
+import com.diploma.robot_warehouse_backend.dto.ParsedQr;
 import com.diploma.robot_warehouse_backend.dto.TaskCompleteRequest;
-import com.diploma.robot_warehouse_backend.dto.TaskResponse;
-import com.diploma.robot_warehouse_backend.service.TaskDispatchService;
+import com.diploma.robot_warehouse_backend.dto.PutawayTaskResponse;
+import com.diploma.robot_warehouse_backend.service.DeliveryDispatchService;
+import com.diploma.robot_warehouse_backend.service.PutawayDispatchService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -10,32 +13,47 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/robot/tasks")
 public class RobotTaskController {
 
-    private final TaskDispatchService taskDispatchService;
+    private final PutawayDispatchService putawayDispatchService;
+    private final DeliveryDispatchService deliveryDispatchService;
 
-    public RobotTaskController(TaskDispatchService taskDispatchService) {
-        this.taskDispatchService = taskDispatchService;
+    public RobotTaskController(PutawayDispatchService putawayDispatchService, DeliveryDispatchService deliveryDispatchService) {
+        this.putawayDispatchService = putawayDispatchService;
+        this.deliveryDispatchService = deliveryDispatchService;
     }
 
     @GetMapping("/next")
-    public ResponseEntity<TaskResponse> next(@RequestParam String robotId) {
-        return taskDispatchService.getNextTask(robotId)
+    public ResponseEntity<PutawayTaskResponse> nextPutaway(@RequestParam String robotId) {
+        return putawayDispatchService.getNextTask(robotId)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
     @PostMapping("/{taskId}/complete")
-    public ResponseEntity<Void> complete(@PathVariable Integer taskId,
+    public ResponseEntity<Void> completePutaway(@PathVariable Integer taskId,
                                          @RequestBody TaskCompleteRequest req) {
 
         ParsedQr qr = parseObservedQr(req.getObservedQr()); // sku/manufacturer or nulls
 
-        taskDispatchService.completeTask(taskId, req.getRobotId(), req.isSuccess(), qr.sku(), qr.manufacturer());
+        putawayDispatchService.completeTask(taskId, req.getRobotId(), req.isSuccess(), qr.getSku(), qr.getManufacturer());
 
         return ResponseEntity.ok().build();
     }
 
-    // --- helpers ---
+    @GetMapping("/next-delivery")
+    public ResponseEntity<DeliveryTaskResponse> nextDelivery(@RequestParam String robotId) {
+        return deliveryDispatchService.getNextDeliveryTask(robotId)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.noContent().build());
+    }
 
+    @PostMapping("/{taskId}/complete")
+    public ResponseEntity<Void> completeDelivery(@PathVariable Integer taskId,
+                                                 @RequestBody TaskCompleteRequest req) {
+        deliveryDispatchService.completeDeliveryTask(taskId, req.getRobotId(), req.isSuccess());
+        return ResponseEntity.ok().build();
+    }
+
+    // --- helpers ---
     private ParsedQr parseObservedQr(String observedQr) {
         if (observedQr == null) return new ParsedQr(null, null);
 
@@ -58,6 +76,5 @@ public class RobotTaskController {
         return new ParsedQr(sku, manufacturer);
     }
 
-    private record ParsedQr(String sku, String manufacturer) {}
 }
 

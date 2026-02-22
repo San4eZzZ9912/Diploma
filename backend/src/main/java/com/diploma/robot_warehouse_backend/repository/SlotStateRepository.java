@@ -25,4 +25,36 @@ public interface SlotStateRepository extends JpaRepository<SlotState, Integer> {
         limit 1
     """, nativeQuery = true)
     Optional<SlotState> findFirstFreeForUpdate();
+
+    @Query(value = """
+        select st.*
+        from slot_state st
+        join shelf_slots ss on ss.slot_id = st.slot_id
+        join shelves sh on sh.shelf_code = ss.shelf_code
+        where st.occupied = true
+          and st.reserved = false
+          and st.cube_qr = :cubeQr
+          and ss.enabled = true
+          and sh.role = 'STORAGE'
+        order by st.updated_at asc
+        for update skip locked
+        limit 1
+    """, nativeQuery = true)
+    Optional<SlotState> findFirstOccupiedStorageByCubeQrForUpdate(String cubeQr);
+
+    @Query(value = """
+        select st.*
+        from slot_state st
+        join shelf_slots sl on sl.slot_id = st.slot_id
+        join shelves sh on sh.shelf_code = sl.shelf_code
+        where st.occupied = false
+          and st.reserved = false
+          and sl.enabled = true
+          and sh.role = 'DELIVERY'
+          and sl.level = 'UPPER'
+        order by sl.side asc
+        for update skip locked
+        limit 1
+    """, nativeQuery = true)
+    Optional<SlotState> findFirstFreeDeliveryUpperForUpdate();
 }

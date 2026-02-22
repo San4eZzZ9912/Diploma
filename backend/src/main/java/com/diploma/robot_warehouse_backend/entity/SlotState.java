@@ -47,6 +47,11 @@ public class SlotState {
     @Setter
     private ShelfSlot slot;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "product_id")
+    @Setter
+    private Product product;
+
     public SlotState(ShelfSlot slot) {
         this.slot = slot;
         this.occupied = false;

@@ -2,6 +2,7 @@ package com.diploma.robot_warehouse_backend.service;
 
 import com.diploma.robot_warehouse_backend.dto.NavPoseResponse;
 import com.diploma.robot_warehouse_backend.entity.Shelf;
+import com.diploma.robot_warehouse_backend.entity.ShelfSlot;
 import com.diploma.robot_warehouse_backend.entity.Task;
 import com.diploma.robot_warehouse_backend.enums.Role;
 import com.diploma.robot_warehouse_backend.enums.Status;
@@ -35,16 +36,19 @@ public class RobotNavService {
         if (tOpt.isEmpty()) return Optional.empty();
 
         Task t = tOpt.get();
-        String code = t.getTargetShelfCode();
-        if (code == null || code.isBlank()) {
-            throw new IllegalStateException("IN_PROGRESS task has no target_shelf_code: taskId=" + t.getId());
+        ShelfSlot targetSlot = t.getTargetSlot();
+        if (targetSlot == null) {
+            throw new IllegalStateException("IN_PROGRESS task has no target_slot_id: taskId=" + t.getId());
         }
 
-        Shelf shelf = shelfRepository.findByShelfCode(code)
-                .orElseThrow(() -> new IllegalStateException("Shelf not found: " + code));
+        Shelf shelf = targetSlot.getShelf();
+        if (shelf == null) {
+            throw new IllegalStateException("targetSlot has null shelf: taskId=" + t.getId());
+        }
 
         return Optional.of(toPose(shelf));
     }
+
 
     private NavPoseResponse toPose(Shelf s) {
         if (s.getMapX() == null || s.getMapY() == null || s.getMapYaw() == null) {

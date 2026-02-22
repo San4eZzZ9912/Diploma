@@ -1,7 +1,10 @@
 package com.diploma.robot_warehouse_backend.service;
 
 import com.diploma.robot_warehouse_backend.dto.TaskUiRow;
+import com.diploma.robot_warehouse_backend.entity.ShelfSlot;
 import com.diploma.robot_warehouse_backend.entity.Task;
+import com.diploma.robot_warehouse_backend.enums.Level;
+import com.diploma.robot_warehouse_backend.enums.Side;
 import com.diploma.robot_warehouse_backend.enums.Status;
 import com.diploma.robot_warehouse_backend.repository.TaskRepository;
 import org.springframework.stereotype.Service;
@@ -32,15 +35,21 @@ public class TasksUiService {
     }
 
     private TaskUiRow toRow(Task t) {
+        ShelfSlot ts = t.getTargetSlot();
+
+        String shelfCode = (ts != null && ts.getShelf() != null) ? ts.getShelf().getShelfCode() : null;
+        Side side = (ts != null) ? ts.getSide() : null;
+        Level level = (ts != null) ? ts.getLevel() : null;
+
         return new TaskUiRow(
                 t.getId(),
                 t.getStatus(),
                 t.getRobotId(),
                 t.getProduct() != null ? t.getProduct().getSku() : null,
                 t.getProduct() != null ? t.getProduct().getManufacturer() : null,
-                t.getTargetShelfCode(),
-                t.getTargetSide(),
-                t.getTargetLevel(),
+                shelfCode,
+                side,
+                level,
                 t.getCreatedAt(),
                 t.getUpdatedAt()
         );
