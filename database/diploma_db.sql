@@ -1,11 +1,16 @@
 -- ============================================================
--- Warehouse Robot DB schema (PostgreSQL) - FINAL
+-- Warehouse Robot DB schema (PostgreSQL) - FINAL (Inbound + Outbound)
 -- Recreate-from-scratch version
 -- ============================================================
 
 DROP TABLE IF EXISTS tasks CASCADE;
+
+DROP TABLE IF EXISTS outbound_lines CASCADE;
+DROP TABLE IF EXISTS outbounds CASCADE;
+
 DROP TABLE IF EXISTS inbound_lines CASCADE;
 DROP TABLE IF EXISTS inbounds CASCADE;
+
 DROP TABLE IF EXISTS products CASCADE;
 
 DROP TABLE IF EXISTS slot_state CASCADE;
@@ -46,7 +51,6 @@ CREATE TABLE shelf_slots (
         REFERENCES shelves (shelf_code)
         ON DELETE CASCADE,
 
-    -- IMPORTANT: include level, otherwise UPPER/LOWER cannot coexist
     CONSTRAINT uq_shelf_side_level
         UNIQUE (shelf_code, side, level),
 
@@ -78,8 +82,8 @@ CREATE INDEX idx_products_manu ON products(manufacturer);
 
 -- -------------------------
 -- SLOT STATE (1:1 with shelf_slots)
--- Stores "what is in the slot" using product_id + stored_at for FIFO
--- cube_qr can be kept for validation (what robot actually saw)
+-- "Что лежит в слоте" = product_id + stored_at (FIFO)
+-- cube_qr можно оставить для валидации (что робот реально увидел)
 -- -------------------------
 CREATE TABLE slot_state (
     slot_id           INTEGER PRIMARY KEY,
@@ -106,14 +110,12 @@ CREATE TABLE slot_state (
         REFERENCES products (product_id)
         ON DELETE RESTRICT,
 
-    -- reserved flag must match reserved_task_id
     CONSTRAINT chk_slot_state_reserved_task
         CHECK (
             (reserved = false AND reserved_task_id IS NULL)
          OR (reserved = true  AND reserved_task_id IS NOT NULL)
         ),
 
-    -- inventory consistency: empty slot -> no product/stored_at
     CONSTRAINT chk_slot_state_inventory
         CHECK (
             (occupied = false AND product_id IS NULL AND stored_at IS NULL)
@@ -126,13 +128,13 @@ CREATE INDEX idx_slot_state_reserved ON slot_state(reserved);
 CREATE INDEX idx_slot_state_updated  ON slot_state(updated_at);
 CREATE INDEX idx_slot_state_product  ON slot_state(product_id);
 
--- FIFO index: fastest "pick oldest available unit"
+-- FIFO index: "выбрать самый старый доступный слот"
 CREATE INDEX idx_slot_state_fifo_pick
 ON slot_state (product_id, stored_at)
 WHERE occupied = true AND reserved = false;
 
 -- -------------------------
--- INBOUNDS (document header)
+-- INBOUNDS (приёмка: шапка)
 -- -------------------------
 CREATE TABLE inbounds (
     inbound_id SERIAL PRIMARY KEY,
@@ -140,15 +142,13 @@ CREATE TABLE inbounds (
     source       VARCHAR(128),
     external_ref VARCHAR(64),
     file_name    VARCHAR(255),
-    file_hash    VARCHAR(64),
 
     status       VARCHAR(16) NOT NULL DEFAULT 'NEW',
     created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    processed_at TIMESTAMP
 );
 
 -- -------------------------
--- INBOUND LINES (document lines)
+-- INBOUND LINES (приёмка: строки)
 -- -------------------------
 CREATE TABLE inbound_lines (
     inbound_line_id SERIAL PRIMARY KEY,
@@ -176,9 +176,51 @@ CREATE INDEX idx_inbound_lines_product ON inbound_lines(product_id);
 CREATE INDEX idx_inbound_lines_status  ON inbound_lines(status);
 
 -- -------------------------
+-- OUTBOUNDS (отбор/отгрузка: шапка)
+-- -------------------------
+CREATE TABLE outbounds (
+    outbound_id SERIAL PRIMARY KEY,
+
+    external_ref VARCHAR(64),    -- внешний номер заявки (опционально)
+
+    status       VARCHAR(16) NOT NULL DEFAULT 'NEW',
+    created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+);
+
+CREATE INDEX idx_outbounds_status ON outbounds(status);
+
+-- -------------------------
+-- OUTBOUND LINES (отбор/отгрузка: строки)
+-- -------------------------
+CREATE TABLE outbound_lines (
+    outbound_line_id SERIAL PRIMARY KEY,
+
+    outbound_id INTEGER NOT NULL,
+    product_id  INTEGER NOT NULL,
+    quantity    INTEGER NOT NULL CHECK (quantity > 0),
+
+    status      VARCHAR(16) NOT NULL DEFAULT 'NEW',
+    created_at  TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_outbound_lines_outbound
+        FOREIGN KEY (outbound_id)
+        REFERENCES outbounds (outbound_id)
+        ON DELETE RESTRICT,
+
+    CONSTRAINT fk_outbound_lines_product
+        FOREIGN KEY (product_id)
+        REFERENCES products (product_id)
+        ON DELETE RESTRICT
+);
+
+CREATE INDEX idx_outbound_lines_outbound ON outbound_lines(outbound_id);
+CREATE INDEX idx_outbound_lines_product  ON outbound_lines(product_id);
+CREATE INDEX idx_outbound_lines_status   ON outbound_lines(status);
+
+-- -------------------------
 -- TASKS
--- PUTAWAY: inbound_line_id MUST be NOT NULL
--- DELIVERY: inbound_line_id MUST be NULL (created from UI/operator request)
+-- Задача относится ЛИБО к inbound_line (PUTAWAY),
+-- ЛИБО к outbound_line (DELIVERY)
 -- -------------------------
 CREATE TABLE tasks (
     task_id SERIAL PRIMARY KEY,
@@ -186,14 +228,15 @@ CREATE TABLE tasks (
     source_slot_id INTEGER,
     target_slot_id INTEGER,
 
-    inbound_line_id INTEGER,      -- NOW nullable (important)
-    product_id      INTEGER NOT NULL,
+    inbound_line_id  INTEGER,
+    outbound_line_id INTEGER,
+
+    product_id INTEGER NOT NULL,   -- удобно для диспетчера/робота (денормализация)
 
     status   VARCHAR(16) NOT NULL DEFAULT 'NEW',
     type     VARCHAR(16) NOT NULL DEFAULT 'PUTAWAY',
     robot_id VARCHAR(32),
 
-    -- what robot reported (optional; can be used for validation)
     observed_sku          VARCHAR(64),
     observed_manufacturer VARCHAR(64),
 
@@ -205,9 +248,14 @@ CREATE TABLE tasks (
         REFERENCES products (product_id)
         ON DELETE RESTRICT,
 
-    CONSTRAINT fk_task_inbound
+    CONSTRAINT fk_task_inbound_line
         FOREIGN KEY (inbound_line_id)
         REFERENCES inbound_lines (inbound_line_id)
+        ON DELETE RESTRICT,
+
+    CONSTRAINT fk_task_outbound_line
+        FOREIGN KEY (outbound_line_id)
+        REFERENCES outbound_lines (outbound_line_id)
         ON DELETE RESTRICT,
 
     CONSTRAINT fk_task_source_slot
@@ -223,34 +271,41 @@ CREATE TABLE tasks (
     CONSTRAINT chk_task_type
         CHECK (type IN ('PUTAWAY', 'DELIVERY')),
 
-    -- key rule: inbound is required only for PUTAWAY
-    CONSTRAINT chk_task_putaway_requires_inbound
+    -- строго: одна из ссылок должна быть задана, и она зависит от типа
+    CONSTRAINT chk_task_parent_by_type
         CHECK (
-            (type = 'PUTAWAY'  AND inbound_line_id IS NOT NULL)
-         OR (type = 'DELIVERY' AND inbound_line_id IS NULL)
+            (type = 'PUTAWAY'  AND inbound_line_id  IS NOT NULL AND outbound_line_id IS NULL)
+         OR (type = 'DELIVERY' AND inbound_line_id  IS NULL     AND outbound_line_id IS NOT NULL)
         )
 );
 
-CREATE INDEX idx_tasks_status       ON tasks(status);
-CREATE INDEX idx_tasks_type         ON tasks(type);
-CREATE INDEX idx_tasks_product      ON tasks(product_id);
-CREATE INDEX idx_tasks_inbound_line ON tasks(inbound_line_id);
+CREATE INDEX idx_tasks_status        ON tasks(status);
+CREATE INDEX idx_tasks_type          ON tasks(type);
+CREATE INDEX idx_tasks_product       ON tasks(product_id);
+CREATE INDEX idx_tasks_inbound_line  ON tasks(inbound_line_id);
+CREATE INDEX idx_tasks_outbound_line ON tasks(outbound_line_id);
+
+-- теперь можно связать slot_state.reserved_task_id -> tasks.task_id (т.к. tasks уже существует)
+ALTER TABLE slot_state
+ADD CONSTRAINT fk_slot_state_reserved_task
+FOREIGN KEY (reserved_task_id)
+REFERENCES tasks(task_id)
+ON DELETE SET NULL;
 
 -- ============================================================
 -- SEED EXAMPLE
 -- ============================================================
+
 INSERT INTO shelves (shelf_code, description, role)
 VALUES
-  ('A', 'Pick point', 'PICK'),
-  ('B', 'Shelf B', 'STORAGE'),
+  ('A', 'Pick point',     'PICK'),
+  ('B', 'Shelf B',        'STORAGE'),
   ('C', 'Delivery point', 'DELIVERY');
 
--- Example shelf coordinates
 UPDATE shelves SET map_x = 0.0, map_y = 0.7,  map_yaw =  3.14 WHERE shelf_code = 'A';
 UPDATE shelves SET map_x = 1.5, map_y = -1.5, map_yaw =  0.00 WHERE shelf_code = 'B';
 UPDATE shelves SET map_x = 1.5, map_y = -1.5, map_yaw =  3.14 WHERE shelf_code = 'C';
 
--- Create slots: A/B/C, LEFT/RIGHT, UPPER/LOWER where needed
 INSERT INTO shelf_slots (shelf_code, side, level, apriltag_id, enabled)
 VALUES
   ('A', 'RIGHT', 'UPPER', 0, true),
@@ -264,9 +319,10 @@ VALUES
   ('C', 'RIGHT', 'UPPER', 2, true),
   ('C', 'LEFT',  'UPPER', 2, true);
 
--- Initialize slot_state rows (1:1 per slot)
-INSERT INTO slot_state (slot_id, occupied, reserved, reserved_task_id, product_id, stored_at, cube_qr, updated_at, robot_id)
-SELECT slot_id, false, false, NULL, NULL, NULL, NULL, CURRENT_TIMESTAMP, NULL
+INSERT INTO slot_state (
+    slot_id, reserved_task_id, occupied, reserved, product_id, stored_at, cube_qr, updated_at, robot_id
+)
+SELECT slot_id, NULL, false, false, NULL, NULL, NULL, CURRENT_TIMESTAMP, NULL
 FROM shelf_slots;
 
 -- Quick checks
