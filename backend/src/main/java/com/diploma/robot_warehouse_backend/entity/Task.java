@@ -48,8 +48,12 @@ public class Task {
     private LocalDateTime updatedAt;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "inbound_line_id", nullable = false)
+    @JoinColumn(name = "inbound_line_id", nullable = true)
     private InboundLine inboundLine;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "outbound_line_id", nullable = true)
+    private OutboundLine outboundLine;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "product_id", nullable = false)
@@ -68,8 +72,18 @@ public class Task {
     public Task(Status status, InboundLine inboundLine, Product product) {
         this.status = status;
         this.inboundLine = inboundLine;
+        this.outboundLine = null;
         this.product = product;
         this.createdAt = LocalDateTime.now();
         this.type = Type.PUTAWAY;
+    }
+
+    public Task(Status status, OutboundLine outboundLine, Product product) {
+        this.status = status;
+        this.inboundLine = null;
+        this.outboundLine = outboundLine;
+        this.product = product;
+        this.createdAt = LocalDateTime.now();
+        this.type = Type.DELIVERY;
     }
 }

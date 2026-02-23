@@ -12,7 +12,6 @@ import java.time.LocalDateTime;
 @Getter
 @NoArgsConstructor
 public class SlotState {
-
     @Id
     @Column(name = "slot_id")
     private Integer id;
@@ -28,6 +27,10 @@ public class SlotState {
     @Column(name = "updated_at", nullable = false)
     @Setter
     private LocalDateTime updatedAt;
+
+    @Column(name = "stored_at")
+    @Setter
+    private LocalDateTime storedAt;
 
     @Column(name = "robot_id")
     @Setter

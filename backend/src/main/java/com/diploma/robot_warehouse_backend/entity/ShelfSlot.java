@@ -12,7 +12,6 @@ import lombok.Setter;
 @Getter
 @NoArgsConstructor
 public class ShelfSlot {
-
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "slot_id")

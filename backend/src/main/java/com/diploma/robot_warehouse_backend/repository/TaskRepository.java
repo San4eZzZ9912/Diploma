@@ -64,4 +64,7 @@ public interface TaskRepository extends JpaRepository<Task, Integer> {
             "sourceSlot", "sourceSlot.shelf"
     })
     List<Task> findTop50ByStatusInOrderByUpdatedAtDesc(List<Status> statuses);
+
+    List<Task> findByOutboundLine_Id(Integer outboundLineId);
+    List<Task> findByInboundLine_Id(Integer inboundLineId);
 }

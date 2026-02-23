@@ -12,6 +12,4 @@ public class InboundImportResult {
     private Integer linesCount;
     private Integer tasksCreated;
     private String fileName;
-
-
 }

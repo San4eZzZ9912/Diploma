@@ -32,10 +32,9 @@ public class DeliveryDispatchService {
         if (task == null) return Optional.empty();
 
         Product product = task.getProduct();
-        String cubeQr = buildCubeQr(product.getSku(), product.getManufacturer());
 
         SlotState occupied = slotStateRepository
-                .findFirstOccupiedStorageByCubeQrForUpdate(cubeQr)
+                .findOldestOccupiedStorageByProductIdForUpdate(product.getId())
                 .orElse(null);
 
         if (occupied == null) {
@@ -45,16 +44,28 @@ public class DeliveryDispatchService {
         ShelfSlot sourceSlot = occupied.getSlot();
         Shelf sourceShelf = sourceSlot.getShelf();
 
+        SlotState deliveryFree = slotStateRepository.findFirstFreeDeliveryUpperForUpdate().orElse(null);
+
+        if (deliveryFree == null) {
+            return Optional.empty();
+        }
+
         Shelf deliveryShelf = shelfRepository.findFirstByRole(Role.DELIVERY).orElseThrow(() -> new IllegalArgumentException("DELIVERY shelf not found"));
+        ShelfSlot targetSlot = deliveryFree.getSlot();
 
         occupied.setReserved(true);
         occupied.setReservedTaskId(task.getId());
         occupied.setUpdatedAt(LocalDateTime.now());
 
+        deliveryFree.setReserved(true);
+        deliveryFree.setReservedTaskId(task.getId());
+        deliveryFree.setUpdatedAt(LocalDateTime.now());
+
         task.setType(Type.DELIVERY);
         task.setStatus(Status.IN_PROGRESS);
         task.setRobotId(robotId);
         task.setSourceSlot(sourceSlot);
+        task.setTargetSlot(targetSlot);
         task.setUpdatedAt(LocalDateTime.now());
 
         slotStateRepository.save(occupied);
@@ -76,7 +87,12 @@ public class DeliveryDispatchService {
                 sourceShelf.getMapY(),
                 sourceShelf.getMapYaw(),
 
-                deliveryShelf.getShelfCode(),
+                targetSlot.getId(),
+                targetSlot.getShelf().getShelfCode(),
+                targetSlot.getLevel(),
+                targetSlot.getSide(),
+                targetSlot.getApriltagId(),
+
                 deliveryShelf.getMapX(),
                 deliveryShelf.getMapY(),
                 deliveryShelf.getMapYaw()
@@ -115,7 +131,8 @@ public class DeliveryDispatchService {
 
         if (success) {
             sourceState.setOccupied(false);
-
+            sourceState.setProduct(null);
+            sourceState.setStoredAt(null);
             sourceState.setCubeQr(null);
             task.setStatus(Status.DONE);
         } else {

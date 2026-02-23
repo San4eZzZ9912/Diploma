@@ -8,12 +8,10 @@ import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -58,8 +56,7 @@ public class InboundImportService {
                     continue;
                 }
 
-
-                line.trim();
+                line = line.trim();
 
                 if (line.isEmpty()) {
                     continue;
@@ -78,6 +75,7 @@ public class InboundImportService {
 
                 InboundLine inboundLine = new InboundLine(inbound, product, quantity);
                 inboundLineRepository.save(inboundLine);
+                linesCreated++;
 
                 List<Task> tasks = new ArrayList<>();
 

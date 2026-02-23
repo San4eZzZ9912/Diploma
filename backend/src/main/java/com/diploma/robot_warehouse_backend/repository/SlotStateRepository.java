@@ -29,18 +29,18 @@ public interface SlotStateRepository extends JpaRepository<SlotState, Integer> {
     @Query(value = """
         select st.*
         from slot_state st
-        join shelf_slots ss on ss.slot_id = st.slot_id
-        join shelves sh on sh.shelf_code = ss.shelf_code
+        join shelf_slots sl on sl.slot_id = st.slot_id
+        join shelves sh on sh.shelf_code = sl.shelf_code
         where st.occupied = true
           and st.reserved = false
-          and st.cube_qr = :cubeQr
-          and ss.enabled = true
+          and st.product_id = :productId
+          and sl.enabled = true
           and sh.role = 'STORAGE'
-        order by st.updated_at asc
+        order by st.stored_at asc
         for update skip locked
         limit 1
     """, nativeQuery = true)
-    Optional<SlotState> findFirstOccupiedStorageByCubeQrForUpdate(String cubeQr);
+    Optional<SlotState> findOldestOccupiedStorageByProductIdForUpdate(Integer productId);
 
     @Query(value = """
         select st.*

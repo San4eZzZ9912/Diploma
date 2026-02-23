@@ -13,7 +13,6 @@ import java.util.List;
 @Getter
 @NoArgsConstructor
 public class Shelf {
-
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "shelf_id")
@@ -23,13 +22,13 @@ public class Shelf {
     @Setter
     private String shelfCode;
 
-    @Column(name = "map_x")
-    private Double mapX;
-
     @Column(name = "role", nullable = false)
     @Enumerated(EnumType.STRING)
     @Setter
     private Role role;
+
+    @Column(name = "map_x")
+    private Double mapX;
 
     @Column(name = "map_y")
     private Double mapY;

@@ -23,7 +23,7 @@ public class PutawayDispatchService {
 
     @Transactional
     public Optional<PutawayTaskResponse> getNextTask(String robotId) {
-        Task task = taskRepository.findNextNewForUpdate().orElse(null);
+        Task task = taskRepository.findNextNewPutawayForUpdate().orElse(null);
 
         if (task == null) {
             return Optional.empty();
@@ -98,13 +98,16 @@ public class PutawayDispatchService {
             slotState.setCubeQr(cubeQr);
             slotState.setRobotId(robotId);
             slotState.setUpdatedAt(LocalDateTime.now());
+            slotState.setStoredAt(LocalDateTime.now());
+            slotState.setProduct(task.getProduct());
             task.setStatus(Status.DONE);
         } else {
             slotState.setOccupied(false);
             slotState.setCubeQr(null);
             slotState.setRobotId(robotId);
             slotState.setUpdatedAt(LocalDateTime.now());
-
+            slotState.setStoredAt(null);
+            slotState.setProduct(null);
             task.setStatus(Status.ERROR);
         }
 

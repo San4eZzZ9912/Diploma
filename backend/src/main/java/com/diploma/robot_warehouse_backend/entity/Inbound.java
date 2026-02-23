@@ -28,9 +28,6 @@ public class Inbound {
     @Column(name = "file_name")
     private String fileName;
 
-    @Column(name = "file_hash")
-    private String fileHash;
-
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
     private Status status;
@@ -38,9 +35,6 @@ public class Inbound {
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
-
-    @Column(name = "processed_at")
-    private LocalDateTime processedAt;
 
     @OneToMany(mappedBy = "inbound")
     private List<InboundLine> inboundLines;
@@ -50,5 +44,6 @@ public class Inbound {
         this.externalRef = externalRef;
         this.fileName = fileName;
         this.status = status;
+        this.createdAt = LocalDateTime.now();
     }
 }

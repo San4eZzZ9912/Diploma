@@ -16,6 +16,11 @@
            th:classappend="${activePage}=='tasks' ? ' active' : ''">
             Задачи
         </a>
+
+        <a th:href="@{/outbounds/create}"
+           th:classappend="${activePage}=='outbounds' ? ' active' : ''">
+            Отбор (Outbound)
+        </a>
     </nav>
 </header>
 

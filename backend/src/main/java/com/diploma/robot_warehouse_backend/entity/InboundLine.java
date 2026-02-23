@@ -19,11 +19,11 @@ public class InboundLine {
     @Column(name = "inbound_line_id")
     private Integer id;
 
-    @Column(name = "quantity", nullable = false)
+    @Column(nullable = false)
     private Integer quantity;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false)
+    @Column(nullable = false)
     private Status status;
 
     @CreationTimestamp

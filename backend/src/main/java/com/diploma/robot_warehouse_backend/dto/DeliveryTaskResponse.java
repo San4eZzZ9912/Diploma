@@ -27,7 +27,12 @@ public class DeliveryTaskResponse {
     private Double sourceY;
     private Double sourceYaw;
 
+    private Integer targetSlotId;
     private String deliveryShelfCode;
+    private Level targetLevel;
+    private Side targetSide;
+    private Integer targetApriltagId;
+
     private Double targetX;
     private Double targetY;
     private Double targetYaw;

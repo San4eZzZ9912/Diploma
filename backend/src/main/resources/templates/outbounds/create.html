@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Создать Outbound (отбор)</title>
+
+    <style>
+        body { font-family: Arial, sans-serif; margin: 32px; }
+        .row { max-width: 1100px; }
+        .muted { color: #777; font-size: 13px; }
+        .ok { margin-top: 14px; color: #0a7a0a; }
+        .err { margin-top: 14px; color: #b00020; }
+
+        .card { padding: 18px; border: 1px solid #ddd; border-radius: 12px; background: #fff; }
+        .grid { display: grid; grid-template-columns: 1fr 240px; gap: 14px; align-items: end; }
+        label { display:block; margin-top: 10px; }
+        input { width: 100%; padding: 10px; margin-top: 6px; box-sizing: border-box; }
+        button { padding: 10px 14px; cursor: pointer; }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+        th, td { padding: 10px; border-bottom: 1px solid #e5e5e5; text-align: left; vertical-align: top; }
+        th { font-size: 13px; color: #333; }
+        .badge { padding: 3px 8px; border-radius: 999px; border: 1px solid #ddd; font-size: 12px; }
+        .actions { white-space: nowrap; }
+    </style>
+
+    <link rel="stylesheet" th:href="@{/css/app.css}">
+</head>
+
+<body>
+<div th:replace="~{fragments/topbar :: topbar('outbounds')}"></div>
+
+<div class="row">
+    <h1>Создать заявку на отбор (Outbound)</h1>
+    <div class="muted">
+        Шаг 1: найдите товар (по названию). Шаг 2: выберите товар в списке, укажите количество и номер заявки.
+    </div>
+
+    <!-- Сообщения -->
+    <div class="ok" th:if="${ok}" th:text="${ok}"></div>
+    <div class="err" th:if="${error}" th:text="${error}"></div>
+
+    <!-- Поиск товаров -->
+    <div class="card" style="margin-top:16px;">
+        <form th:action="@{/outbounds/create}" method="get">
+            <div class="grid">
+                <div>
+                    <label>Поиск товара (по названию)</label>
+                    <input name="q" th:value="${q}" placeholder="например: bosch / шуруповерт / a123"/>
+                </div>
+                <div class="actions">
+                    <button type="submit">Найти</button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Создание outbound -->
+    <div class="card" style="margin-top:16px;">
+        <h2 style="margin-top:0;">Создание Outbound</h2>
+        <div class="muted">Выберите товар из списка ниже, затем укажите количество и номер заявки.</div>
+
+        <form th:action="@{/outbounds/create}" method="post">
+            <div class="grid" style="margin-top:10px;">
+                <div>
+                    <label>Номер заявки (externalRef)</label>
+                    <input name="externalRef" placeholder="например: OUT-0000123" required/>
+                </div>
+                <div>
+                    <label>Количество</label>
+                    <input name="quantity" type="number" min="1" step="1" value="1" required/>
+                </div>
+            </div>
+
+            <h3 style="margin-top:16px; margin-bottom:6px;">Товары в наличии (STORAGE)</h3>
+
+            <table>
+                <thead>
+                <tr>
+                    <th style="width:60px;">Выбор</th>
+                    <th>Название</th>
+                    <th>SKU</th>
+                    <th>Производитель</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr th:if="${#lists.isEmpty(products)}">
+                    <td colspan="4" class="muted">Нет товаров в наличии (или ничего не найдено по запросу).</td>
+                </tr>
+
+                <tr th:each="p : ${products}">
+                    <td>
+                        <input type="radio" name="productId" th:value="${p.id}" required/>
+                    </td>
+                    <td th:text="${p.name}"></td>
+                    <td><span class="badge" th:text="${p.sku}"></span></td>
+                    <td th:text="${p.manufacturer}"></td>
+                </tr>
+                </tbody>
+            </table>
+
+            <button type="submit" style="margin-top:14px;">Создать Outbound и задачи DELIVERY</button>
+        </form>
+    </div>
+</div>
+
+</body>
+</html>

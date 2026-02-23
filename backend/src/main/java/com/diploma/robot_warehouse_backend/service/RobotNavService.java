@@ -6,6 +6,7 @@ import com.diploma.robot_warehouse_backend.entity.ShelfSlot;
 import com.diploma.robot_warehouse_backend.entity.Task;
 import com.diploma.robot_warehouse_backend.enums.Role;
 import com.diploma.robot_warehouse_backend.enums.Status;
+import com.diploma.robot_warehouse_backend.enums.Type;
 import com.diploma.robot_warehouse_backend.repository.ShelfRepository;
 import com.diploma.robot_warehouse_backend.repository.TaskRepository;
 import org.springframework.stereotype.Service;
@@ -25,6 +26,13 @@ public class RobotNavService {
 
     @Transactional
     public NavPoseResponse getPickPose(String robotId) {
+        Optional<Task> tOpt = taskRepository.findFirstByRobotIdAndStatus(robotId, Status.IN_PROGRESS);
+        if (tOpt.isPresent() && tOpt.get().getType() == Type.DELIVERY) {
+            ShelfSlot sourceSlot = tOpt.get().getSourceSlot();
+            if (sourceSlot == null) throw new IllegalStateException("DELIVERY has no sourceSlot");
+            return toPose(sourceSlot.getShelf());
+        }
+
         Shelf pick = shelfRepository.findFirstByRole(Role.PICK)
                 .orElseThrow(() -> new IllegalStateException("No PICK shelf found"));
         return toPose(pick);
@@ -32,21 +40,30 @@ public class RobotNavService {
 
     @Transactional
     public Optional<NavPoseResponse> getPlacePose(String robotId) {
+
+
         Optional<Task> tOpt = taskRepository.findFirstByRobotIdAndStatus(robotId, Status.IN_PROGRESS);
         if (tOpt.isEmpty()) return Optional.empty();
 
         Task t = tOpt.get();
-        ShelfSlot targetSlot = t.getTargetSlot();
-        if (targetSlot == null) {
-            throw new IllegalStateException("IN_PROGRESS task has no target_slot_id: taskId=" + t.getId());
-        }
 
-        Shelf shelf = targetSlot.getShelf();
-        if (shelf == null) {
-            throw new IllegalStateException("targetSlot has null shelf: taskId=" + t.getId());
-        }
+        if (t.getType() == Type.DELIVERY) {
+            Shelf delivery = shelfRepository.findFirstByRole(Role.DELIVERY)
+                    .orElseThrow(() -> new IllegalStateException("No PICK shelf found"));
+            return Optional.of(toPose(delivery));
+        } else {
+            ShelfSlot targetSlot = t.getTargetSlot();
+            if (targetSlot == null) {
+                throw new IllegalStateException("IN_PROGRESS task has no target_slot_id: taskId=" + t.getId());
+            }
 
-        return Optional.of(toPose(shelf));
+            Shelf shelf = targetSlot.getShelf();
+            if (shelf == null) {
+                throw new IllegalStateException("targetSlot has null shelf: taskId=" + t.getId());
+            }
+
+            return Optional.of(toPose(shelf));
+        }
     }
 
 
