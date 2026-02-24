@@ -3,6 +3,7 @@ package com.diploma.robot_warehouse_backend.repository;
 import com.diploma.robot_warehouse_backend.entity.SlotState;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import java.util.Optional;
 
@@ -57,4 +58,17 @@ public interface SlotStateRepository extends JpaRepository<SlotState, Integer> {
         limit 1
     """, nativeQuery = true)
     Optional<SlotState> findFirstFreeDeliveryUpperForUpdate();
+
+    @Query(value = """
+        select count(*)
+        from slot_state st
+        join shelf_slots sl on sl.slot_id = st.slot_id
+        join shelves sh on sh.shelf_code = sl.shelf_code
+        where st.occupied = true
+          and st.reserved = false
+          and st.product_id = :productId
+          and sl.enabled = true
+          and sh.role = 'STORAGE'
+    """, nativeQuery = true)
+    int countAvailableStorageByProductId(@Param("productId") Integer productId);
 }

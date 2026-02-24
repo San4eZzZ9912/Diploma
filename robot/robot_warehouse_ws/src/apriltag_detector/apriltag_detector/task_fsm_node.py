@@ -69,6 +69,10 @@ class TaskFSMNode(Node):
         self.current_target_level = None
         self.current_target_apriltag_id = None
         self.place_side = None
+        self.current_task_type = None
+        self.current_pick_level = "UPPER"
+        self.current_place_level = "UPPER"
+        self.current_pick_apriltag_id = None
 
         # Временные метки и состояние FSM
         self.state_enter_t = None
@@ -133,6 +137,7 @@ class TaskFSMNode(Node):
         self.create_subscription(Bool, "/arm/has_cube", self.on_arm_has_cube, 10)
 
         self.pub_arm_target_level = self.create_publisher(String, "/arm/target_level", 10)
+        self.pub_arm_pick_level = self.create_publisher(String, "/arm/pick_level", 10)
 
         # Клиенты сервисов
         self.arm_pick = self.create_client(Trigger, "/arm/pick")
@@ -216,6 +221,16 @@ class TaskFSMNode(Node):
         self.rest_robot_id = self.get_parameter_or("rest_robot_id", "robot1").value
         self.rest_cube_qr_fallback = self.get_parameter_or("rest_cube_qr_fallback", "UNKNOWN/UNKNOWN").value
 
+        # REST paths (new)
+        self.rest_next_putaway_path  = self.get_parameter_or("rest_next_putaway_path",  "/api/robot/tasks/next").value
+        self.rest_next_delivery_path = self.get_parameter_or("rest_next_delivery_path", "/api/robot/delivery/next").value
+
+        self.rest_complete_putaway_tpl  = self.get_parameter_or("rest_complete_putaway_tpl",  "/api/robot/tasks/{id}/complete").value
+        self.rest_complete_delivery_tpl = self.get_parameter_or("rest_complete_delivery_tpl", "/api/robot/delivery/{id}/complete").value
+
+        # Priority: PUTAWAY_FIRST or DELIVERY_FIRST
+        self.rest_task_priority = self.get_parameter_or("rest_task_priority", "PUTAWAY_FIRST").value.strip().upper()
+
         # Pick shelf fallback
         self.pick_shelf_code = self.get_parameter_or("pick_shelf_code", "A").value.strip().upper()
         self.pick_shelf_name = self.pick_shelf_code
@@ -237,14 +252,17 @@ class TaskFSMNode(Node):
             return None
 
         if self.state in ("FIND_TAG_FOR_PICK", "APPROACH_TAG_PREQR", "QR_FOCUS"):
-            # Для pick — можно использовать фиксированный тег (параметр pick_tag_id)
+            # DELIVERY: use sourceApriltagId if we have it
+            if self.current_task_type == "DELIVERY" and self.current_pick_apriltag_id is not None:
+                return self.current_pick_apriltag_id
+
+            # PUTAWAY fallback: fixed pick_tag_id
             pick_tag = self.get_parameter_or("pick_tag_id", -1).value
             return pick_tag if pick_tag >= 0 else None
 
-        elif self.state in ("FIND_TAG_FOR_PLACE", "APPROACH_TAG_FOR_PLACE"):
+        if self.state in ("FIND_TAG_FOR_PLACE", "APPROACH_TAG_FOR_PLACE"):
             if self.current_target_apriltag_id is not None and self.current_target_apriltag_id >= 0:
                 return self.current_target_apriltag_id
-            self.get_logger().warn("No valid targetApriltagId for PLACE → tag filtering off")
             return None
 
         return None
@@ -332,7 +350,9 @@ class TaskFSMNode(Node):
             self.get_logger().warn(f"MCU motion PID set failed: {e}")
 
     def _is_lower_level(self) -> bool:
-        return str(self.current_target_level).strip().upper() == "LOWER"
+        pick_states = {"FIND_TAG_FOR_PICK", "APPROACH_TAG_PREQR", "QR_FOCUS", "CALL_PICK", "WAIT_PICK_DONE", "BACK_OFF_2S"}
+        lvl = self.current_pick_level if self.state in pick_states else self.current_place_level
+        return str(lvl).strip().upper() == "LOWER"
 
     def _pre_qr_goal_z(self) -> float:
         return float(self.tag_goal_z_pre_qr_lower if self._is_lower_level() else self.tag_goal_z_pre_qr_upper)
@@ -680,6 +700,11 @@ class TaskFSMNode(Node):
             if not self.arm_pick.wait_for_service(timeout_sec=0.2):
                 self.get_logger().warn("/arm/pick not ready")
                 return
+
+            lvl = String()
+            lvl.data = str(self.current_pick_level or "UPPER")
+            self.pub_arm_pick_level.publish(lvl)
+
             self.pick_future = self.arm_pick.call_async(Trigger.Request())
             self._enter("WAIT_PICK_DONE", now)
             return
@@ -795,6 +820,11 @@ class TaskFSMNode(Node):
                 self.current_target_level = None
                 self.current_target_apriltag_id = None
 
+                self.current_task_type = None
+                self.current_pick_level = "UPPER"
+                self.current_place_level = "UPPER"
+                self.current_pick_apriltag_id = None
+
                 # сбрасываем qr ожидания, чтобы не держать старую задачу
                 self.expected_qr = None
 
@@ -846,17 +876,29 @@ class TaskFSMNode(Node):
         self._set_tag_target_id(exp if exp is not None else -1)
 
     def _fetch_next_task(self):
-        """GET /api/robot/tasks/next?robotId=R1 -> dict or None (if 204)"""
+        """Try PUTAWAY and DELIVERY endpoints; return task json or None (204)."""
         if not self.rest_enable:
             return None
 
-        url = f"{self.rest_base_url}/api/robot/tasks/next"
-        try:
+        def _try(path: str):
+            url = f"{self.rest_base_url}{path}"
             r = requests.get(url, params={"robotId": self.rest_robot_id}, timeout=self.rest_timeout)
             if r.status_code == 204:
                 return None
             r.raise_for_status()
             return r.json()
+
+        try:
+            if self.rest_task_priority == "DELIVERY_FIRST":
+                t = _try(self.rest_next_delivery_path)
+                if t is not None:
+                    return t
+                return _try(self.rest_next_putaway_path)
+            else:
+                t = _try(self.rest_next_putaway_path)
+                if t is not None:
+                    return t
+                return _try(self.rest_next_delivery_path)
         except Exception as e:
             self.get_logger().warn(f"REST next task failed: {e}")
             return None
@@ -876,16 +918,19 @@ class TaskFSMNode(Node):
         return f"{sku}/{manufacturer}"
 
     def _complete_task_async(self, task_id: int, success: bool, observed_qr: str | None):
-        """POST /api/robot/tasks/{id}/complete"""
         if not self.rest_enable:
             return
 
-        url = f"{self.rest_base_url}/api/robot/tasks/{int(task_id)}/complete"
-        payload = {
-            "robotId": self.rest_robot_id,
-            "success": bool(success),
-            "observedQr": observed_qr
-        }
+        t = str(self.current_task_type or "PUTAWAY").strip().upper()
+        if t == "DELIVERY":
+            path = self.rest_complete_delivery_tpl.replace("{id}", str(int(task_id)))
+            # delivery completion observedQr не нужен, но можно отправить — backend просто проигнорит
+            payload = {"robotId": self.rest_robot_id, "success": bool(success)}
+        else:
+            path = self.rest_complete_putaway_tpl.replace("{id}", str(int(task_id)))
+            payload = {"robotId": self.rest_robot_id, "success": bool(success), "observedQr": observed_qr}
+
+        url = f"{self.rest_base_url}{path}"
 
         def worker():
             try:
@@ -893,7 +938,7 @@ class TaskFSMNode(Node):
                 if r.status_code >= 400:
                     self.get_logger().warn(f"REST complete -> {r.status_code}: {r.text[:200]}")
                 else:
-                    self.get_logger().info(f"REST complete -> {r.status_code} taskId={task_id}")
+                    self.get_logger().info(f"REST complete -> {r.status_code} taskId={task_id} type={t}")
             except Exception as e:
                 self.get_logger().warn(f"REST complete failed: {e}")
 
@@ -902,31 +947,11 @@ class TaskFSMNode(Node):
     def _apply_task(self, task_json: dict):
         self.current_task = task_json
         self.current_task_id = int(task_json["taskId"])
-        self.pick_shelf_name = self.pick_shelf_code
 
-        # куда класть
-        shelf_code = str(task_json["targetShelfCode"]).strip().upper()
-        side = str(task_json["targetSide"]).strip().upper()      # LEFT/RIGHT
-        level = str(task_json["targetLevel"]).strip().upper()    # UPPER/LOWER
+        ttype = str(task_json.get("type", "PUTAWAY")).strip().upper()
+        self.current_task_type = ttype
 
-        self.place_shelf_name = shelf_code
-        self.current_target_level = level
-        self.current_target_side = "left" if side == "LEFT" else "right"
-        raw = task_json.get("targetApriltagId", None)
-        try:
-            self.current_target_apriltag_id = int(raw) if raw is not None else None
-        except (TypeError, ValueError):
-            self.current_target_apriltag_id = None
-
-        if self.current_target_apriltag_id is not None and self.current_target_apriltag_id >= 0:
-            self._set_tag_target_id(self.current_target_apriltag_id);
-        else:
-            self._set_tag_target_id(-1)
-
-        self.get_logger().info(
-            f"Task accepted: id={self.current_task_id} place={shelf_code} {side} {level} "
-        )
-
+        # === SKU/MFR для QR target ===
         sku = str(task_json.get("sku", "")).strip()
         mfr = str(task_json.get("manufacturer", "")).strip()
         target_payload = f"{sku}/{mfr}".strip()
@@ -936,7 +961,49 @@ class TaskFSMNode(Node):
         msg.data = target_payload
         self.pub_qr_target.publish(msg)
 
-        self.get_logger().info(f"QR target published: {target_payload}")
+        # === DELIVERY: pick is from source shelf/level/tag ===
+        if ttype == "DELIVERY":
+            self.pick_shelf_name = str(task_json.get("sourceShelfCode", "")).strip().upper() or self.pick_shelf_code
+            self.current_pick_level = str(task_json.get("sourceLevel", "UPPER")).strip().upper()
+
+            raw = task_json.get("sourceApriltagId", None)
+            try:
+                self.current_pick_apriltag_id = int(raw) if raw is not None else None
+            except:
+                self.current_pick_apriltag_id = None
+
+            # TARGET for delivery: if DTO has only deliveryShelfCode -> use defaults
+            shelf_code = str(task_json.get("targetShelfCode") or task_json.get("deliveryShelfCode", "C")).strip().upper()
+            side = str(task_json.get("targetSide", "RIGHT")).strip().upper()
+            level = str(task_json.get("targetLevel", "UPPER")).strip().upper()
+            raw_tag = task_json.get("targetApriltagId", None)
+
+        else:
+            # PUTAWAY: pick is fixed (pick_tag_id parameter)
+            self.pick_shelf_name = self.pick_shelf_code
+            self.current_pick_level = "UPPER"
+            pick_tag = self.get_parameter_or("pick_tag_id", -1).value
+            self.current_pick_apriltag_id = int(pick_tag) if pick_tag is not None and int(pick_tag) >= 0 else None
+
+            # PUTAWAY target
+            shelf_code = str(task_json["targetShelfCode"]).strip().upper()
+            side = str(task_json["targetSide"]).strip().upper()
+            level = str(task_json["targetLevel"]).strip().upper()
+            raw_tag = task_json.get("targetApriltagId", None)
+
+        # === common place fields ===
+        self.place_shelf_name = shelf_code
+        self.current_place_level = level
+        self.current_target_level = level  # если где-то в коде ещё используется, оставь
+        self.current_target_side = "left" if side == "LEFT" else "right"
+
+        try:
+            self.current_target_apriltag_id = int(raw_tag) if raw_tag is not None else None
+        except:
+            self.current_target_apriltag_id = None
+
+        # Log
+        self.get_logger().info(f"Task accepted: id={self.current_task_id} type={ttype} pickLvl={self.current_pick_level} place={shelf_code} {side} {level}")
 
     # -------------------- Controllers --------------------
     def _tag_control(self, x_err: float, z_err: float, ang: float):

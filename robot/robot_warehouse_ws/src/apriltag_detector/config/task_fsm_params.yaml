@@ -14,8 +14,17 @@ task_fsm_node:
     grasp_margin: 0.005
     qr_u_tol_margin_px: 5.0
 
+    # MCU motion PID (Rosmaster)
+    use_motion_pid: true
+    motion_kp: 1.2
+    motion_ki: 0.25
+    motion_kd: 0.40
+    motion_pid_forever: false
+
+
     # Подход к AprilTag (общий)
-    goal_z: 0.34
+    goal_z_upper: 0.34
+    goal_z_lower: 0.47
     z_tolerance: 0.03
     ang_tolerance: 0.03
     k_ang: 0.6
@@ -29,10 +38,12 @@ task_fsm_node:
     min_vz: 0.020
 
     # Переход к QR и фокусировка QR
-    tag_goal_z_pre_qr: 0.35
+    tag_goal_z_pre_qr_upper: 0.36
+    tag_goal_z_pre_qr_lower: 0.36
     pre_qr_z_margin: 0.03
     pregrasp_wait: 2.0
     qr_target_w_px: 170.0
+    qr_target_w_px_lower: 140
     qr_u_tol_px: 25.0
     qr_u_tol_exit_px: 35.0
     qr_w_tol_px: 15.0
@@ -66,10 +77,16 @@ task_fsm_node:
 
     # Связь с backend
     rest_enable: true
-    rest_base_url: "http://192.168.0.109:8080"
-    rest_timeout_sec: 0.6
+    rest_base_url: "http://192.168.0.107:8080"
+    rest_timeout_sec: 3
     rest_robot_id: "robot1"
     rest_cube_qr_fallback: "UNKNOWN/UNKNOWN"
+
+    rest_next_putaway_path: "/api/robot/tasks/next"
+    rest_next_delivery_path:  "/api/robot/delivery/next"
+    rest_complete_putaway_tpl:  "/api/robot/tasks/{id}/complete"
+    rest_complete_delivery_tpl:  "/api/robot/delivery/{id}/complete"
+    rest_task_priority: "PUTAWAY_FIRST"
 
     # Навигация
     use_mission_nav: true

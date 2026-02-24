@@ -45,6 +45,7 @@ class ArmControllerNode(Node):
         self.busy = False
         self.has_cube = False
         self.place_level = "UPPER"  # default
+        self.pick_level = "UPPER"  # default
 
         self._seq = []
         self._seq_i = 0
@@ -66,6 +67,11 @@ class ArmControllerNode(Node):
         self.arm_grasp     = [93, 90, 80, 5, 90, 112]
         self.arm_post_pick = [93, 180, 0, 0, 90, 112]
 
+        # PICK LOWER (стартовые значения — подстрой под свой стеллаж)
+        self.arm_pre_pick_lower   = [93, 40, 0, 147, 90, 30]
+        self.arm_grasp_lower      = [93, 40, 0, 147, 90, 112]
+        self.arm_post_pick_lower  = [93, 180, 0, 0, 90, 112]
+
         # PLACE UPPER (как у тебя)
         self.arm_above_place_upper = [93, 90, 90, 5, 90, 112]
         self.arm_pre_place_upper   = [93, 90, 80, 5, 90, 112]
@@ -83,6 +89,7 @@ class ArmControllerNode(Node):
         self.pub_busy = self.create_publisher(Bool, "/arm/busy", 10)
 
         self.create_subscription(String, "/arm/target_level", self.on_target_level, 10)
+        self.create_subscription(String, "/arm/pick_level", self.on_pick_level, 10)
 
         # ---- services ----
         self.srv_pick = self.create_service(Trigger, "/arm/pick", self.handle_pick)
@@ -121,11 +128,19 @@ class ArmControllerNode(Node):
         grasp_ms = int(self.get_parameter("pick_grasp_ms").value)
         post_ms = int(self.get_parameter("pick_post_ms").value)
 
-        self._seq = [
-            {"pose": self.arm_pre_pick,  "ms": pre_ms,   "settle": settle,       "on_finish": None},
-            {"pose": self.arm_grasp,     "ms": grasp_ms, "settle": settle,       "on_finish": None},
-            {"pose": self.arm_post_pick, "ms": post_ms,  "settle": final_settle, "on_finish": self._mark_cube_taken},
-        ]
+        if self.pick_level == "UPPER":
+            self._seq = [
+                {"pose": self.arm_pre_pick,  "ms": pre_ms,   "settle": settle,       "on_finish": None},
+                {"pose": self.arm_grasp,     "ms": grasp_ms, "settle": settle,       "on_finish": None},
+                {"pose": self.arm_post_pick, "ms": post_ms,  "settle": final_settle, "on_finish": self._mark_cube_taken},
+            ]
+        elif self.pick_level == "LOWER":
+            self._seq = [
+                {"pose": self.arm_pre_pick_lower,  "ms": pre_ms,   "settle": settle,       "on_finish": None},
+                {"pose": self.arm_grasp_lower,     "ms": grasp_ms, "settle": settle,       "on_finish": None},
+                {"pose": self.arm_post_pick_lower, "ms": post_ms,  "settle": final_settle, "on_finish": self._mark_cube_taken},
+            ]
+
         self._start_sequence("PICK")
 
         response.success = True
@@ -176,6 +191,13 @@ class ArmControllerNode(Node):
         response.message = f"{seq_name} started"
         return response
 
+
+    def on_pick_level(self, msg: String):
+        lvl = (msg.data or "").strip().upper()
+        if lvl not in ("UPPER", "LOWER"):
+            return
+        self.pick_level = lvl
+        self.get_logger().info(f"ARM pick level -> {self.pick_level}")
     # ================= UPDATE LOOP =================
 
     def update(self):

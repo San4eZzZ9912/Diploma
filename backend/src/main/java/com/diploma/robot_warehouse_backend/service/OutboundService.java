@@ -6,10 +6,7 @@ import com.diploma.robot_warehouse_backend.entity.OutboundLine;
 import com.diploma.robot_warehouse_backend.entity.Product;
 import com.diploma.robot_warehouse_backend.entity.Task;
 import com.diploma.robot_warehouse_backend.enums.Status;
-import com.diploma.robot_warehouse_backend.repository.OutboundLineRepository;
-import com.diploma.robot_warehouse_backend.repository.OutboundRepository;
-import com.diploma.robot_warehouse_backend.repository.ProductRepository;
-import com.diploma.robot_warehouse_backend.repository.TaskRepository;
+import com.diploma.robot_warehouse_backend.repository.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,15 +19,17 @@ public class OutboundService {
     private final OutboundLineRepository outboundLineRepository;
     private final ProductRepository productRepository;
     private final TaskRepository taskRepository;
+    private final SlotStateRepository slotStateRepository;
 
     public OutboundService(OutboundRepository outboundRepository,
                            OutboundLineRepository outboundLineRepository,
                            ProductRepository productRepository,
-                           TaskRepository taskRepository) {
+                           TaskRepository taskRepository, SlotStateRepository slotStateRepository) {
         this.outboundRepository = outboundRepository;
         this.outboundLineRepository = outboundLineRepository;
         this.productRepository = productRepository;
         this.taskRepository = taskRepository;
+        this.slotStateRepository = slotStateRepository;
     }
 
     @Transactional
@@ -47,8 +46,16 @@ public class OutboundService {
             throw new IllegalArgumentException("External ref already exists");
         }
 
+        int available = slotStateRepository.countAvailableStorageByProductId(productId);
+        if (quantity > available) {
+            throw new IllegalStateException(
+                    "Недостаточно товара на складе. Запрошено=" + quantity + ", доступно=" + available
+            );
+        }
+
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new IllegalArgumentException("Product not found"));
+
 
         Outbound outbound = new Outbound(externalRef, Status.NEW);
         outboundRepository.save(outbound);
