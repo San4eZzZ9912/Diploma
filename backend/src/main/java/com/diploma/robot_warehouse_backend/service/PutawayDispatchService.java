@@ -3,7 +3,7 @@ package com.diploma.robot_warehouse_backend.service;
 import com.diploma.robot_warehouse_backend.dto.PutawayTaskResponse;
 import com.diploma.robot_warehouse_backend.entity.*;
 import com.diploma.robot_warehouse_backend.enums.Status;
-import com.diploma.robot_warehouse_backend.enums.Type;
+import com.diploma.robot_warehouse_backend.mapper.PutawayTaskMapper;
 import com.diploma.robot_warehouse_backend.repository.SlotStateRepository;
 import com.diploma.robot_warehouse_backend.repository.TaskRepository;
 import jakarta.transaction.Transactional;
@@ -15,10 +15,12 @@ import java.util.Optional;
 public class PutawayDispatchService {
     private final TaskRepository taskRepository;
     private final SlotStateRepository slotStateRepository;
+    private final PutawayTaskMapper putawayTaskMapper;
 
-    public PutawayDispatchService(TaskRepository taskRepository, SlotStateRepository slotStateRepository) {
+    public PutawayDispatchService(TaskRepository taskRepository, SlotStateRepository slotStateRepository, PutawayTaskMapper putawayTaskMapper) {
         this.taskRepository = taskRepository;
         this.slotStateRepository = slotStateRepository;
+        this.putawayTaskMapper = putawayTaskMapper;
     }
 
     @Transactional
@@ -42,7 +44,6 @@ public class PutawayDispatchService {
         freeState.setReservedTaskId(task.getId());
         freeState.setUpdatedAt(LocalDateTime.now());
 
-        task.setType(Type.PUTAWAY);
         task.setStatus(Status.IN_PROGRESS);
         task.setRobotId(robotId);
         task.setTargetSlot(slot);
@@ -50,19 +51,7 @@ public class PutawayDispatchService {
 
         Product product = task.getProduct();
 
-        PutawayTaskResponse putawayTaskResponse = new PutawayTaskResponse(
-                task.getId(),
-                task.getType(),
-                product.getSku(),
-                product.getManufacturer(),
-                shelf.getShelfCode(),
-                slot.getLevel(),
-                slot.getSide(),
-                slot.getApriltagId(),
-                shelf.getMapX(),
-                shelf.getMapY(),
-                shelf.getMapYaw()
-        );
+        PutawayTaskResponse putawayTaskResponse = putawayTaskMapper.toResponse(task);
         slotStateRepository.save(freeState);
         taskRepository.save(task);
 

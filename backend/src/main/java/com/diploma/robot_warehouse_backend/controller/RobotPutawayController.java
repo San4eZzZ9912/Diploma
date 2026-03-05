@@ -1,8 +1,8 @@
 package com.diploma.robot_warehouse_backend.controller;
 
 import com.diploma.robot_warehouse_backend.dto.ParsedQr;
-import com.diploma.robot_warehouse_backend.dto.TaskCompleteRequest;
 import com.diploma.robot_warehouse_backend.dto.PutawayTaskResponse;
+import com.diploma.robot_warehouse_backend.dto.TaskCompleteRequest;
 import com.diploma.robot_warehouse_backend.service.DeliveryDispatchService;
 import com.diploma.robot_warehouse_backend.service.PutawayDispatchService;
 import org.springframework.http.ResponseEntity;
@@ -13,11 +13,9 @@ import org.springframework.web.bind.annotation.*;
 public class RobotPutawayController {
 
     private final PutawayDispatchService putawayDispatchService;
-    private final DeliveryDispatchService deliveryDispatchService;
 
-    public RobotPutawayController(PutawayDispatchService putawayDispatchService, DeliveryDispatchService deliveryDispatchService) {
+    public RobotPutawayController(PutawayDispatchService putawayDispatchService) {
         this.putawayDispatchService = putawayDispatchService;
-        this.deliveryDispatchService = deliveryDispatchService;
     }
 
     @GetMapping("/next")
