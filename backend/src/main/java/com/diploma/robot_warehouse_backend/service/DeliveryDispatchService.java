@@ -5,6 +5,7 @@ import com.diploma.robot_warehouse_backend.entity.*;
 import com.diploma.robot_warehouse_backend.enums.Role;
 import com.diploma.robot_warehouse_backend.enums.Status;
 import com.diploma.robot_warehouse_backend.enums.Type;
+import com.diploma.robot_warehouse_backend.mapper.DeliveryTaskMapper;
 import com.diploma.robot_warehouse_backend.repository.ShelfRepository;
 import com.diploma.robot_warehouse_backend.repository.SlotStateRepository;
 import com.diploma.robot_warehouse_backend.repository.TaskRepository;
@@ -16,14 +17,16 @@ import java.util.Optional;
 
 @Service
 public class DeliveryDispatchService {
-    public final TaskRepository taskRepository;
-    public final SlotStateRepository slotStateRepository;
-    public final ShelfRepository shelfRepository;
+    private final TaskRepository taskRepository;
+    private final SlotStateRepository slotStateRepository;
+    private final ShelfRepository shelfRepository;
+    private final DeliveryTaskMapper deliveryTaskMapper;
 
-    public DeliveryDispatchService(TaskRepository taskRepository, SlotStateRepository slotStateRepository, ShelfRepository shelfRepository) {
+    public DeliveryDispatchService(TaskRepository taskRepository, SlotStateRepository slotStateRepository, ShelfRepository shelfRepository, DeliveryTaskMapper deliveryTaskMapper) {
         this.taskRepository = taskRepository;
         this.slotStateRepository = slotStateRepository;
         this.shelfRepository = shelfRepository;
+        this.deliveryTaskMapper = deliveryTaskMapper;
     }
 
     @Transactional
@@ -61,7 +64,6 @@ public class DeliveryDispatchService {
         deliveryFree.setReservedTaskId(task.getId());
         deliveryFree.setUpdatedAt(LocalDateTime.now());
 
-        task.setType(Type.DELIVERY);
         task.setStatus(Status.IN_PROGRESS);
         task.setRobotId(robotId);
         task.setSourceSlot(sourceSlot);
@@ -69,34 +71,10 @@ public class DeliveryDispatchService {
         task.setUpdatedAt(LocalDateTime.now());
 
         slotStateRepository.save(occupied);
+        slotStateRepository.save(deliveryFree);
         taskRepository.save(task);
 
-        DeliveryTaskResponse deliveryTaskResponse = new DeliveryTaskResponse(
-                task.getId(),
-                task.getType(),
-                product.getSku(),
-                product.getManufacturer(),
-
-                sourceSlot.getId(),
-                sourceShelf.getShelfCode(),
-                sourceSlot.getLevel(),
-                sourceSlot.getSide(),
-                sourceSlot.getApriltagId(),
-
-                sourceShelf.getMapX(),
-                sourceShelf.getMapY(),
-                sourceShelf.getMapYaw(),
-
-                targetSlot.getId(),
-                targetSlot.getShelf().getShelfCode(),
-                targetSlot.getLevel(),
-                targetSlot.getSide(),
-                targetSlot.getApriltagId(),
-
-                deliveryShelf.getMapX(),
-                deliveryShelf.getMapY(),
-                deliveryShelf.getMapYaw()
-        );
+        DeliveryTaskResponse deliveryTaskResponse = deliveryTaskMapper.toResponse(task, deliveryShelf);
 
         return Optional.of(deliveryTaskResponse);
     }

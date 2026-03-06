@@ -1,6 +1,6 @@
 package com.diploma.robot_warehouse_backend.controller;
 
-import com.diploma.robot_warehouse_backend.dto.DeliveryTaskResponseOld;
+import com.diploma.robot_warehouse_backend.dto.DeliveryTaskResponse;
 import com.diploma.robot_warehouse_backend.dto.TaskCompleteRequest;
 import com.diploma.robot_warehouse_backend.service.DeliveryDispatchService;
 import org.springframework.http.ResponseEntity;
@@ -16,7 +16,7 @@ public class RobotDeliveryController {
     }
 
     @GetMapping("/next")
-    public ResponseEntity<DeliveryTaskResponseOld> next(@RequestParam String robotId) {
+    public ResponseEntity<DeliveryTaskResponse> next(@RequestParam String robotId) {
         return deliveryDispatchService.getNextDeliveryTask(robotId)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.noContent().build());
