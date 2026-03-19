@@ -22,8 +22,8 @@ public record DeliveryTaskResponse(
 
         Integer targetSlotId,
         String deliveryShelfCode,
-        Level targerLevel,
-        Side targedSide,
+        Level targetLevel,
+        Side targetSide,
         Integer targetApriltagId,
         Double targetX,
         Double targetY,
