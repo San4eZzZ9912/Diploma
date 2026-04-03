@@ -67,4 +67,8 @@ public interface TaskRepository extends JpaRepository<Task, Integer> {
 
     List<Task> findByOutboundLine_Id(Integer outboundLineId);
     List<Task> findByInboundLine_Id(Integer inboundLineId);
+
+    List<Task> findByOutboundLine_Outbound_IdAndStatus(Integer outboundId, Status status);
+
+    boolean existsByOutboundLine_Outbound_IdAndStatusIn(Integer outboundId, List<Status> statuses);
 }

@@ -4,6 +4,7 @@ import com.diploma.robot_warehouse_backend.enums.Status;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -22,6 +23,7 @@ public class Outbound {
     private String externalRef;
 
     @Enumerated(EnumType.STRING)
+    @Setter
     @Column(name = "status", nullable = false)
     private Status status;
 
