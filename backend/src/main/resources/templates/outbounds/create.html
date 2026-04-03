@@ -7,22 +7,28 @@
 
     <style>
         body { font-family: Arial, sans-serif; margin: 32px; }
-        .row { max-width: 1100px; }
+        .row { max-width: 1200px; }
         .muted { color: #777; font-size: 13px; }
         .ok { margin-top: 14px; color: #0a7a0a; }
         .err { margin-top: 14px; color: #b00020; }
 
-        .card { padding: 18px; border: 1px solid #ddd; border-radius: 12px; background: #fff; }
+        .card { padding: 18px; border: 1px solid #ddd; border-radius: 12px; background: #fff; margin-top: 16px; }
         .grid { display: grid; grid-template-columns: 1fr 240px; gap: 14px; align-items: end; }
         label { display:block; margin-top: 10px; }
         input { width: 100%; padding: 10px; margin-top: 6px; box-sizing: border-box; }
         button { padding: 10px 14px; cursor: pointer; }
 
         table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-        th, td { padding: 10px; border-bottom: 1px solid #e5e5e5; text-align: left; vertical-align: top; }
+        th, td { padding: 10px; border-bottom: 1px solid #e5e5e5; text-align: left; vertical-align: middle; }
         th { font-size: 13px; color: #333; }
         .badge { padding: 3px 8px; border-radius: 999px; border: 1px solid #ddd; font-size: 12px; }
         .actions { white-space: nowrap; }
+        .qty-input { width: 90px; }
+        .btn-small { padding: 6px 10px; font-size: 13px; }
+        .cart-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid #eee; }
+        .cart-left { flex: 1; }
+        .cart-right { white-space: nowrap; }
+        .empty { color: #777; font-size: 14px; padding: 10px 0; }
     </style>
 
     <link rel="stylesheet" th:href="@{/css/app.css}">
@@ -34,15 +40,14 @@
 <div class="row">
     <h1>Создать заявку на отбор (Outbound)</h1>
     <div class="muted">
-        Шаг 1: найдите товар (по названию). Шаг 2: выберите товар в списке, укажите количество и номер заявки.
+        Пользователь формирует корзину из нескольких товаров. На основе одной заявки создаётся один Outbound, несколько OutboundLine и набор DELIVERY-задач.
     </div>
 
-    <!-- Сообщения -->
     <div class="ok" th:if="${ok}" th:text="${ok}"></div>
     <div class="err" th:if="${error}" th:text="${error}"></div>
 
-    <!-- Поиск товаров -->
-    <div class="card" style="margin-top:16px;">
+    <!-- Поиск -->
+    <div class="card">
         <form th:action="@{/outbounds/create}" method="get">
             <div class="grid">
                 <div>
@@ -56,54 +61,185 @@
         </form>
     </div>
 
-    <!-- Создание outbound -->
-    <div class="card" style="margin-top:16px;">
+    <!-- Корзина -->
+    <div class="card">
         <h2 style="margin-top:0;">Создание Outbound</h2>
-        <div class="muted">Выберите товар из списка ниже, затем укажите количество и номер заявки.</div>
+        <div class="muted">
+            Шаг 1: найдите товары. Шаг 2: добавьте нужные позиции в корзину. Шаг 3: создайте outbound.
+        </div>
 
-        <form th:action="@{/outbounds/create}" method="post">
+        <form th:action="@{/outbounds/create}" method="post" id="outboundForm">
             <div class="grid" style="margin-top:10px;">
                 <div>
                     <label>Номер заявки (externalRef)</label>
                     <input name="externalRef" placeholder="например: OUT-0000123" required/>
                 </div>
-                <div>
-                    <label>Количество</label>
-                    <input name="quantity" type="number" min="1" step="1" value="1" required/>
-                </div>
+                <div></div>
             </div>
 
-            <h3 style="margin-top:16px; margin-bottom:6px;">Товары в наличии (STORAGE)</h3>
+            <h3 style="margin-top:18px; margin-bottom:6px;">Товары в наличии (STORAGE)</h3>
 
             <table>
                 <thead>
                 <tr>
-                    <th style="width:60px;">Выбор</th>
                     <th>Название</th>
                     <th>SKU</th>
                     <th>Производитель</th>
+                    <th style="width:120px;">Количество</th>
+                    <th style="width:160px;">Действие</th>
                 </tr>
                 </thead>
                 <tbody>
                 <tr th:if="${#lists.isEmpty(products)}">
-                    <td colspan="4" class="muted">Нет товаров в наличии (или ничего не найдено по запросу).</td>
+                    <td colspan="5" class="muted">Нет товаров в наличии (или ничего не найдено по запросу).</td>
                 </tr>
 
                 <tr th:each="p : ${products}">
-                    <td>
-                        <input type="radio" name="productId" th:value="${p.id}" required/>
-                    </td>
                     <td th:text="${p.name}"></td>
                     <td><span class="badge" th:text="${p.sku}"></span></td>
                     <td th:text="${p.manufacturer}"></td>
+                    <td>
+                        <input type="number"
+                               class="qty-input"
+                               min="1"
+                               step="1"
+                               value="1"
+                               th:id="'qty-' + ${p.id}"/>
+                    </td>
+                    <td>
+                        <button type="button"
+                                class="btn-small"
+                                th:attr="onclick=|addToCart('${p.id}','${p.name}','${p.sku}','${p.manufacturer}')|">
+                            Добавить
+                        </button>
+                    </td>
                 </tr>
                 </tbody>
             </table>
 
-            <button type="submit" style="margin-top:14px;">Создать Outbound и задачи DELIVERY</button>
+            <h3 style="margin-top:22px; margin-bottom:6px;">Корзина</h3>
+            <div id="cartItems" class="empty">Корзина пуста.</div>
+
+            <!-- hidden inputs будут добавляться сюда -->
+            <div id="hiddenInputs"></div>
+
+            <button type="submit" style="margin-top:16px;">Создать Outbound и задачи DELIVERY</button>
+
+        </form>
+        <form method="post"
+              th:action="@{/outbounds/pickup-confirm}"
+              th:if="${outboundId != null}">
+
+            <input type="hidden"
+                   name="outboundId"
+                   th:value="${outboundId}" />
+
+            <button type="submit"
+                    style="
+                margin-top:20px;
+                padding:10px 20px;
+                font-size:16px;
+                background-color:#28a745;
+                color:white;
+                border:none;
+                border-radius:5px;
+            ">
+                Забрал текущую партию товаров
+            </button>
+
         </form>
     </div>
 </div>
+
+<script>
+    const cart = [];
+
+    function addToCart(productId, name, sku, manufacturer) {
+        const qtyInput = document.getElementById('qty-' + productId);
+        const quantity = parseInt(qtyInput.value, 10);
+
+        if (!quantity || quantity <= 0) {
+            alert('Количество должно быть больше 0');
+            return;
+        }
+
+        const existing = cart.find(item => item.productId === productId);
+        if (existing) {
+            existing.quantity += quantity;
+        } else {
+            cart.push({
+                productId,
+                name,
+                sku,
+                manufacturer,
+                quantity
+            });
+        }
+
+        renderCart();
+        qtyInput.value = 1;
+    }
+
+    function removeFromCart(productId) {
+        const index = cart.findIndex(item => item.productId === productId);
+        if (index >= 0) {
+            cart.splice(index, 1);
+        }
+        renderCart();
+    }
+
+    function renderCart() {
+        const cartItems = document.getElementById('cartItems');
+        const hiddenInputs = document.getElementById('hiddenInputs');
+
+        hiddenInputs.innerHTML = '';
+
+        if (cart.length === 0) {
+            cartItems.innerHTML = 'Корзина пуста.';
+            cartItems.className = 'empty';
+            return;
+        }
+
+        cartItems.className = '';
+        cartItems.innerHTML = '';
+
+        cart.forEach(item => {
+            const row = document.createElement('div');
+            row.className = 'cart-row';
+            row.innerHTML = `
+                <div class="cart-left">
+                    <strong>${item.name}</strong><br/>
+                    <span class="badge">${item.sku}</span>
+                    <span style="margin-left:8px;">${item.manufacturer}</span><br/>
+                    <span class="muted">Количество: ${item.quantity}</span>
+                </div>
+                <div class="cart-right">
+                    <button type="button" class="btn-small" onclick="removeFromCart('${item.productId}')">Удалить</button>
+                </div>
+            `;
+            cartItems.appendChild(row);
+
+            const productInput = document.createElement('input');
+            productInput.type = 'hidden';
+            productInput.name = 'productId';
+            productInput.value = item.productId;
+            hiddenInputs.appendChild(productInput);
+
+            const qtyInput = document.createElement('input');
+            qtyInput.type = 'hidden';
+            qtyInput.name = 'quantity';
+            qtyInput.value = item.quantity;
+            hiddenInputs.appendChild(qtyInput);
+        });
+    }
+
+    document.getElementById('outboundForm').addEventListener('submit', function (e) {
+        if (cart.length === 0) {
+            e.preventDefault();
+            alert('Добавьте хотя бы один товар в корзину');
+        }
+    });
+</script>
 
 </body>
 </html>
