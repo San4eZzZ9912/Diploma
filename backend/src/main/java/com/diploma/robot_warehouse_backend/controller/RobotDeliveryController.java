@@ -7,7 +7,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/robot/delivery")
+@RequestMapping("/api/robot/task/delivery")
 public class RobotDeliveryController {
     private final DeliveryDispatchService deliveryDispatchService;
 

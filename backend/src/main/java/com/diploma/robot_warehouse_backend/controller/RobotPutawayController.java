@@ -9,7 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/robot/tasks")
+@RequestMapping("/api/robot/task/putaway")
 public class RobotPutawayController {
 
     private final PutawayDispatchService putawayDispatchService;
