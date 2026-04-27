@@ -13,4 +13,5 @@
 - robot/ — код робота
 - backend/ — серверная часть
 - database/ — структура БД
+- docker/ - docker-compose файл 
 
