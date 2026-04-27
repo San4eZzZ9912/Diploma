@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Outbound</title>
+
+    <style>
+        body { font-family: Arial, sans-serif; margin: 32px; }
+        .row { max-width: 1200px; }
+        .muted { color: #777; font-size: 13px; }
+        .ok { margin-top: 14px; color: #0a7a0a; }
+        .err { margin-top: 14px; color: #b00020; }
+
+        .card {
+            padding: 18px;
+            border: 1px solid #ddd;
+            border-radius: 12px;
+            background: #fff;
+            margin-top: 16px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+        }
+
+        th, td {
+            padding: 10px;
+            border-bottom: 1px solid #e5e5e5;
+            text-align: left;
+            vertical-align: middle;
+        }
+
+        th {
+            font-size: 13px;
+            color: #333;
+        }
+
+        .badge {
+            padding: 3px 8px;
+            border-radius: 999px;
+            border: 1px solid #ddd;
+            font-size: 12px;
+        }
+
+        .btn-confirm {
+            margin-top: 20px;
+            padding: 12px 22px;
+            font-size: 16px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .btn-back {
+            display: inline-block;
+            margin-top: 16px;
+            text-decoration: none;
+            color: #333;
+        }
+    </style>
+
+    <link rel="stylesheet" th:href="@{/css/app.css}">
+</head>
+
+<body>
+<div th:replace="~{fragments/topbar :: topbar('outbounds')}"></div>
+
+<div class="row">
+
+    <h1>
+        Outbound #
+        <span th:text="${view.outboundId}"></span>
+    </h1>
+
+    <div class="muted">
+        Заявка:
+        <strong th:text="${view.externalRef}"></strong>
+        |
+        Статус:
+        <span class="badge" th:text="${view.status}"></span>
+    </div>
+
+    <div class="ok" th:if="${ok}" th:text="${ok}"></div>
+    <div class="err" th:if="${error}" th:text="${error}"></div>
+
+    <div class="card">
+        <h2 style="margin-top:0;">Товары, которые нужно доставить</h2>
+
+        <table>
+            <thead>
+            <tr>
+                <th>ID строки</th>
+                <th>Название</th>
+                <th>SKU</th>
+                <th>Производитель</th>
+                <th>Количество</th>
+            </tr>
+            </thead>
+
+            <tbody>
+            <tr th:each="line : ${view.lines}">
+                <td th:text="${line.lineId}"></td>
+                <td th:text="${line.productName}"></td>
+                <td>
+                    <span class="badge" th:text="${line.sku}"></span>
+                </td>
+                <td th:text="${line.manufacturer}"></td>
+                <td th:text="${line.quantity}"></td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2 style="margin-top:0;">DELIVERY-задачи</h2>
+
+        <div class="muted">
+            Здесь отображаются поштучные задачи. Если пользователь заказал 5 товаров,
+            то здесь будет 5 задач. Робот может привозить их партиями по 2 товара.
+        </div>
+
+        <table>
+            <thead>
+            <tr>
+                <th>ID задачи</th>
+                <th>Название</th>
+                <th>SKU</th>
+                <th>Производитель</th>
+                <th>Статус</th>
+            </tr>
+            </thead>
+
+            <tbody>
+            <tr th:each="task : ${view.tasks}">
+                <td th:text="${task.taskId}"></td>
+                <td th:text="${task.productName}"></td>
+                <td>
+                    <span class="badge" th:text="${task.sku}"></span>
+                </td>
+                <td th:text="${task.manufacturer}"></td>
+                <td>
+                    <span class="badge" th:text="${task.status}"></span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+
+        <form method="post"
+              th:action="@{/outbounds/{id}/pickup-confirm(id=${view.outboundId})}">
+
+            <button type="submit" class="btn-confirm">
+                Забрал текущую партию товаров
+            </button>
+
+        </form>
+    </div>
+
+    <a class="btn-back" th:href="@{/outbounds/create}">
+        ← Создать новую заявку
+    </a>
+
+</div>
+
+</body>
+</html>

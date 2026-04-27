@@ -1,8 +1,6 @@
 package com.diploma.robot_warehouse_backend.service;
 
-import com.diploma.robot_warehouse_backend.dto.OutboundCreateRequest;
-import com.diploma.robot_warehouse_backend.dto.OutboundCreateResult;
-import com.diploma.robot_warehouse_backend.dto.OutboundItemRequest;
+import com.diploma.robot_warehouse_backend.dto.*;
 import com.diploma.robot_warehouse_backend.entity.Outbound;
 import com.diploma.robot_warehouse_backend.entity.OutboundLine;
 import com.diploma.robot_warehouse_backend.entity.Product;
@@ -132,5 +130,42 @@ public class OutboundService {
         taskRepository.saveAll(allTasks);
 
         return new OutboundCreateResult(outbound.getId(), linesCreated, totalTasks);
+    }
+
+    @Transactional(readOnly = true)
+    public OutboundDetailsView getOutboundDetails(Integer outboundId) {
+        Outbound outbound = outboundRepository.findById(outboundId)
+                .orElseThrow(() -> new IllegalArgumentException("Outbound not found: " + outboundId));
+
+        List<OutboundLine> lines = outboundLineRepository.findByOutboundIdWithProduct(outboundId);
+        List<Task> tasks = taskRepository.findByOutboundIdWithProduct(outboundId);
+
+        List<OutboundLineView> lineViews = lines.stream()
+                .map(line -> new OutboundLineView(
+                        line.getId(),
+                        line.getProduct().getName(),
+                        line.getProduct().getSku(),
+                        line.getProduct().getManufacturer(),
+                        line.getQuantity()
+                ))
+                .toList();
+
+        List<OutboundTaskView> taskViews = tasks.stream()
+                .map(task -> new OutboundTaskView(
+                        task.getId(),
+                        task.getProduct().getName(),
+                        task.getProduct().getSku(),
+                        task.getProduct().getManufacturer(),
+                        task.getStatus()
+                ))
+                .toList();
+
+        return new OutboundDetailsView(
+                outbound.getId(),
+                outbound.getExternalRef(),
+                outbound.getStatus().name(),
+                lineViews,
+                taskViews
+        );
     }
 }

@@ -9,10 +9,8 @@ import com.diploma.robot_warehouse_backend.service.DeliveryDispatchService;
 import com.diploma.robot_warehouse_backend.service.OutboundService;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -20,11 +18,14 @@ import java.util.List;
 @Controller
 @RequestMapping("/outbounds")
 public class OutboundUiController {
+
     private final OutboundService outboundService;
     private final ProductRepository productRepository;
     private final DeliveryDispatchService deliveryDispatchService;
 
-    public OutboundUiController(OutboundService outboundService, ProductRepository productRepository, DeliveryDispatchService deliveryDispatchService) {
+    public OutboundUiController(OutboundService outboundService,
+                                ProductRepository productRepository,
+                                DeliveryDispatchService deliveryDispatchService) {
         this.outboundService = outboundService;
         this.productRepository = productRepository;
         this.deliveryDispatchService = deliveryDispatchService;
@@ -42,7 +43,8 @@ public class OutboundUiController {
     public String create(@RequestParam String externalRef,
                          @RequestParam(name = "productId") List<Integer> productIds,
                          @RequestParam(name = "quantity") List<Integer> quantities,
-                         Model model) {
+                         Model model,
+                         RedirectAttributes redirectAttributes) {
         try {
             if (productIds == null || productIds.isEmpty()) {
                 throw new IllegalArgumentException("Выберите хотя бы один товар");
@@ -57,6 +59,7 @@ public class OutboundUiController {
             }
 
             List<OutboundItemRequest> items = new ArrayList<>();
+
             for (int i = 0; i < productIds.size(); i++) {
                 OutboundItemRequest item = new OutboundItemRequest();
                 item.setProductId(productIds.get(i));
@@ -69,49 +72,48 @@ public class OutboundUiController {
             request.setItems(items);
 
             OutboundCreateResult result = outboundService.createOutbound(request);
-            model.addAttribute("outboundId", result.getOutboundId());
-            model.addAttribute(
+
+            redirectAttributes.addFlashAttribute(
                     "ok",
                     "Outbound created. id=" + result.getOutboundId()
                             + ", lines=" + result.getLinesCreated()
                             + ", tasks=" + result.getTasksCreated()
             );
+
+            return "redirect:/outbounds/" + result.getOutboundId();
+
         } catch (Exception e) {
             model.addAttribute("error", "Error: " + e.getMessage());
+            model.addAttribute("q", "");
+            model.addAttribute("products", productRepository.findInStockByNameLike(""));
+            return "outbounds/create";
         }
-
-        model.addAttribute("q", "");
-        model.addAttribute("products", productRepository.findInStockByNameLike(""));
-        return "outbounds/create";
     }
 
-    @PostMapping("/pickup-confirm")
-    public String confirmPickup(
-            @RequestParam Integer outboundId,
-            Model model) {
+    @GetMapping("/{outboundId}")
+    public String details(@PathVariable Integer outboundId, Model model) {
+        model.addAttribute("view", outboundService.getOutboundDetails(outboundId));
+        return "outbounds/details";
+    }
 
+    @PostMapping("/{outboundId}/pickup-confirm")
+    public String confirmPickup(@PathVariable Integer outboundId,
+                                RedirectAttributes redirectAttributes) {
         try {
             deliveryDispatchService.confirmPickup(outboundId);
-            model.addAttribute("outboundId", outboundId);
-            model.addAttribute(
+
+            redirectAttributes.addFlashAttribute(
                     "ok",
-                    "Товары забраны. Delivery-слоты освобождены."
+                    "Товары забраны. Delivery-слоты освобождены. Робот может ехать за следующей партией."
             );
 
         } catch (Exception e) {
-            model.addAttribute("outboundId", outboundId);
-            model.addAttribute(
+            redirectAttributes.addFlashAttribute(
                     "error",
                     "Ошибка при подтверждении выдачи: " + e.getMessage()
             );
         }
 
-        model.addAttribute("q", "");
-        model.addAttribute(
-                "products",
-                productRepository.findInStockByNameLike("")
-        );
-
-        return "outbounds/create";
+        return "redirect:/outbounds/" + outboundId;
     }
 }

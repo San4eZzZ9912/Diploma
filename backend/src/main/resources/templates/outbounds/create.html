@@ -68,7 +68,7 @@
             Шаг 1: найдите товары. Шаг 2: добавьте нужные позиции в корзину. Шаг 3: создайте outbound.
         </div>
 
-        <form th:action="@{/outbounds/create}" method="post" id="outboundForm">
+        <form th:action="@{/outbounds/create}" method="post" id="outboundForm" target="_blank">
             <div class="grid" style="margin-top:10px;">
                 <div>
                     <label>Номер заявки (externalRef)</label>
@@ -124,28 +124,6 @@
             <div id="hiddenInputs"></div>
 
             <button type="submit" style="margin-top:16px;">Создать Outbound и задачи DELIVERY</button>
-
-        </form>
-        <form method="post"
-              th:action="@{/outbounds/pickup-confirm}"
-              th:if="${outboundId != null}">
-
-            <input type="hidden"
-                   name="outboundId"
-                   th:value="${outboundId}" />
-
-            <button type="submit"
-                    style="
-                margin-top:20px;
-                padding:10px 20px;
-                font-size:16px;
-                background-color:#28a745;
-                color:white;
-                border:none;
-                border-radius:5px;
-            ">
-                Забрал текущую партию товаров
-            </button>
 
         </form>
     </div>
