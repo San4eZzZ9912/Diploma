@@ -3,20 +3,6 @@
 -- Recreate-from-scratch version
 -- ============================================================
 
-DROP TABLE IF EXISTS tasks CASCADE;
-
-DROP TABLE IF EXISTS outbound_lines CASCADE;
-DROP TABLE IF EXISTS outbounds CASCADE;
-
-DROP TABLE IF EXISTS inbound_lines CASCADE;
-DROP TABLE IF EXISTS inbounds CASCADE;
-
-DROP TABLE IF EXISTS products CASCADE;
-
-DROP TABLE IF EXISTS slot_state CASCADE;
-DROP TABLE IF EXISTS shelf_slots CASCADE;
-DROP TABLE IF EXISTS shelves CASCADE;
-
 -- -------------------------
 -- SHELVES
 -- -------------------------
@@ -144,7 +130,7 @@ CREATE TABLE inbounds (
     file_name    VARCHAR(255),
 
     status       VARCHAR(16) NOT NULL DEFAULT 'NEW',
-    created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- -------------------------
@@ -184,7 +170,7 @@ CREATE TABLE outbounds (
     external_ref VARCHAR(64),    -- внешний номер заявки (опционально)
 
     status       VARCHAR(16) NOT NULL DEFAULT 'NEW',
-    created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_outbounds_status ON outbounds(status);
