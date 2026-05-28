@@ -20,13 +20,13 @@
 <div th:replace="~{fragments/topbar :: topbar('tasks')}"></div>
 <div class="row">
     <h1>Задачи</h1>
-    <div class="muted">Показываю последние 50 в каждой категории</div>
+    <div class="muted">Показываются последние 50 в каждой категории</div>
 
     <h2>Выполняются сейчас (IN_PROGRESS)</h2>
     <table>
         <thead>
         <tr>
-            <th>ID</th><th>Robot</th><th>Товар</th><th>Куда</th><th>Статус</th><th>Updated</th>
+            <th>ID</th><th>Robot</th><th>Товар</th><th>Куда</th><th>Статус</th><th>Тип операции</th><th>Updated</th>
         </tr>
         </thead>
         <tbody>
@@ -39,6 +39,7 @@
             <td th:text="${t.getSku()} + '/' + ${t.getManufacturer()}"></td>
             <td th:text="${t.getTargetShelfCode()} + ' ' + ${t.getTargetSide()} + ' ' + ${t.getTargetLevel()}"></td>
             <td><span class="badge" th:text="${t.getStatus()}"></span></td>
+            <td><span class="badge" th:text="${t.getType()}"></span></td>
             <td th:text="${t.getUpdatedAt()}"></td>
         </tr>
         </tbody>
@@ -48,7 +49,7 @@
     <table>
         <thead>
         <tr>
-            <th>ID</th><th>Товар</th><th>Куда</th><th>Статус</th><th>Created</th>
+            <th>ID</th><th>Товар</th><th>Куда</th><th>Статус</th><th>Тип операции</th><th>Created</th>
         </tr>
         </thead>
         <tbody>
@@ -60,6 +61,7 @@
             <td th:text="${t.getSku()} + '/' + ${t.getManufacturer()}"></td>
             <td th:text="${t.getTargetShelfCode()} + ' ' + ${t.getTargetSide()} + ' ' + ${t.getTargetLevel()}"></td>
             <td><span class="badge" th:text="${t.getStatus()}"></span></td>
+            <td><span class="badge" th:text="${t.getType()}"></span></td>
             <td th:text="${t.getCreatedAt()}"></td>
         </tr>
         </tbody>
@@ -69,7 +71,7 @@
     <table>
         <thead>
         <tr>
-            <th>ID</th><th>Robot</th><th>Товар</th><th>Куда</th><th>Статус</th><th>Updated</th>
+            <th>ID</th><th>Robot</th><th>Товар</th><th>Куда</th><th>Статус</th><th>Тип операции</th><th>Updated</th>
         </tr>
         </thead>
         <tbody>
@@ -82,6 +84,7 @@
             <td th:text="${t.getSku()} + '/' + ${t.getManufacturer()}"></td>
             <td th:text="${t.getTargetShelfCode()} + ' ' + ${t.getTargetSide()} + ' ' + ${t.getTargetLevel()}"></td>
             <td><span class="badge" th:text="${t.getStatus()}"></span></td>
+            <td><span class="badge" th:text="${t.getType()}"></span></td>
             <td th:text="${t.getUpdatedAt()}"></td>
         </tr>
         </tbody>

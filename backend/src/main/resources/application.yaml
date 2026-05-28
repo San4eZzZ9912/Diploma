@@ -3,7 +3,7 @@ spring:
     name: robot-warehouse-backend
 
   datasource:
-    url: jdbc:postgresql://localhost:5433/warehouse_db
+    url: jdbc:postgresql://localhost:5437/warehouse_db
     username: warehouse
     password: warehouse
 

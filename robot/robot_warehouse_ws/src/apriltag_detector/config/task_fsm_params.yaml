@@ -8,7 +8,7 @@ task_fsm_node:
 
     # Камера и геометрия
     camera_info_topic: "/camera/color/camera_info"
-    camera_offset_right_m: 0.020
+    camera_offset_right_m: 0.005
     jaw_width: 0.05
     tag_size: 0.04
     grasp_margin: 0.005
@@ -23,9 +23,9 @@ task_fsm_node:
 
 
     # Подход к AprilTag (общий)
-    goal_z_upper: 0.34
-    goal_z_lower: 0.47
-    z_tolerance: 0.03
+    goal_z_upper: 0.30
+    goal_z_lower: 0.45
+    z_tolerance: 0.02
     ang_tolerance: 0.03
     k_ang: 0.6
     k_x: 0.5
@@ -38,12 +38,12 @@ task_fsm_node:
     min_vz: 0.020
 
     # Переход к QR и фокусировка QR
-    tag_goal_z_pre_qr_upper: 0.36
-    tag_goal_z_pre_qr_lower: 0.36
+    tag_goal_z_pre_qr_upper: 0.32
+    tag_goal_z_pre_qr_lower: 0.45
     pre_qr_z_margin: 0.03
     pregrasp_wait: 2.0
-    qr_target_w_px: 170.0
-    qr_target_w_px_lower: 140
+    qr_target_w_px: 180.0
+    qr_target_w_px_lower: 160
     qr_u_tol_px: 25.0
     qr_u_tol_exit_px: 35.0
     qr_w_tol_px: 15.0
@@ -77,16 +77,16 @@ task_fsm_node:
 
     # Связь с backend
     rest_enable: true
-    rest_base_url: "http://192.168.0.107:8080"
+    rest_base_url: "http://192.168.0.116:8080"
     rest_timeout_sec: 3
     rest_robot_id: "robot1"
     rest_cube_qr_fallback: "UNKNOWN/UNKNOWN"
 
-    rest_next_putaway_path: "/api/robot/tasks/next"
-    rest_next_delivery_path:  "/api/robot/delivery/next"
-    rest_complete_putaway_tpl:  "/api/robot/tasks/{id}/complete"
-    rest_complete_delivery_tpl:  "/api/robot/delivery/{id}/complete"
-    rest_task_priority: "PUTAWAY_FIRST"
+    rest_next_putaway_path: "/api/robot/task/putaway/next"
+    rest_next_delivery_path:  "/api/robot/task/delivery/next"
+    rest_complete_putaway_tpl:  "/api/robot/task/putaway/{id}/complete"
+    rest_complete_delivery_tpl:  "/api/robot/task/delivery/{id}/complete"
+    rest_task_priority: "DELIVERY_FIRST"
 
     # Навигация
     use_mission_nav: true

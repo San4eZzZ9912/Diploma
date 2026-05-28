@@ -44,6 +44,7 @@ public class TasksUiService {
         return new TaskUiRow(
                 t.getId(),
                 t.getStatus(),
+                t.getType(),
                 t.getRobotId(),
                 t.getProduct() != null ? t.getProduct().getSku() : null,
                 t.getProduct() != null ? t.getProduct().getManufacturer() : null,

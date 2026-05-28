@@ -216,17 +216,17 @@ class TaskFSMNode(Node):
 
         # REST
         self.rest_enable = self.get_parameter_or("rest_enable", True).value
-        self.rest_base_url = self.get_parameter_or("rest_base_url", "http://192.168.0.109:8080").value.rstrip("/")
+        self.rest_base_url = self.get_parameter_or("rest_base_url", "http://192.168.0.105:8080").value.rstrip("/")
         self.rest_timeout = self.get_parameter_or("rest_timeout_sec", 1.5).value
         self.rest_robot_id = self.get_parameter_or("rest_robot_id", "robot1").value
         self.rest_cube_qr_fallback = self.get_parameter_or("rest_cube_qr_fallback", "UNKNOWN/UNKNOWN").value
 
         # REST paths (new)
-        self.rest_next_putaway_path  = self.get_parameter_or("rest_next_putaway_path",  "/api/robot/tasks/next").value
-        self.rest_next_delivery_path = self.get_parameter_or("rest_next_delivery_path", "/api/robot/delivery/next").value
+        self.rest_next_putaway_path  = self.get_parameter_or("rest_next_putaway_path",  "/api/robot/task/putaway/next").value
+        self.rest_next_delivery_path = self.get_parameter_or("rest_next_delivery_path", "/api/robot/task/delivery/next").value
 
-        self.rest_complete_putaway_tpl  = self.get_parameter_or("rest_complete_putaway_tpl",  "/api/robot/tasks/{id}/complete").value
-        self.rest_complete_delivery_tpl = self.get_parameter_or("rest_complete_delivery_tpl", "/api/robot/delivery/{id}/complete").value
+        self.rest_complete_putaway_tpl  = self.get_parameter_or("rest_complete_putaway_tpl",  "/api/robot/task/putaway/{id}/complete").value
+        self.rest_complete_delivery_tpl = self.get_parameter_or("rest_complete_delivery_tpl", "/api/robot/task/delivery/{id}/complete").value
 
         # Priority: PUTAWAY_FIRST or DELIVERY_FIRST
         self.rest_task_priority = self.get_parameter_or("rest_task_priority", "PUTAWAY_FIRST").value.strip().upper()

@@ -64,12 +64,12 @@ class DebugOverlayNode(Node):
         # -------- geometry / tolerances (similar to your FSM logic) --------
         self.declare_parameter("jaw_width", 0.05)               # m
         self.declare_parameter("tag_size", 0.04)                # m
-        self.declare_parameter("camera_offset_right_m", 0.021)  # m
+        self.declare_parameter("camera_offset_right_m", 0.005)  # m
         self.declare_parameter("grasp_margin", 0.005)           # m
 
         # Optional: show "ready" status using these tolerances
         self.declare_parameter("ang_tolerance", 0.03)           # rad
-        self.declare_parameter("z_goal_pre_qr", 0.34)           # m (for display only)
+        self.declare_parameter("z_goal_pre_qr", 0.32)           # m (for display only)
         self.declare_parameter("z_goal_place", 0.34)            # m (for display only)
         self.declare_parameter("z_tolerance", 0.03)             # m
 

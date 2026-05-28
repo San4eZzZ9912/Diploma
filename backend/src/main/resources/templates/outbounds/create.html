@@ -38,10 +38,7 @@
 <div th:replace="~{fragments/topbar :: topbar('outbounds')}"></div>
 
 <div class="row">
-    <h1>Создать заявку на отбор (Outbound)</h1>
-    <div class="muted">
-        Пользователь формирует корзину из нескольких товаров. На основе одной заявки создаётся один Outbound, несколько OutboundLine и набор DELIVERY-задач.
-    </div>
+    <h1>Создать заявку на отбор товара</h1>
 
     <div class="ok" th:if="${ok}" th:text="${ok}"></div>
     <div class="err" th:if="${error}" th:text="${error}"></div>
@@ -63,21 +60,21 @@
 
     <!-- Корзина -->
     <div class="card">
-        <h2 style="margin-top:0;">Создание Outbound</h2>
+        <h2 style="margin-top:0;">Создание заявки</h2>
         <div class="muted">
-            Шаг 1: найдите товары. Шаг 2: добавьте нужные позиции в корзину. Шаг 3: создайте outbound.
+            Шаг 1: найдите товары. Шаг 2: добавьте нужные позиции в корзину. Шаг 3: создайте заявку.
         </div>
 
         <form th:action="@{/outbounds/create}" method="post" id="outboundForm" target="_blank">
             <div class="grid" style="margin-top:10px;">
                 <div>
-                    <label>Номер заявки (externalRef)</label>
+                    <label>Номер заявки</label>
                     <input name="externalRef" placeholder="например: OUT-0000123" required/>
                 </div>
                 <div></div>
             </div>
 
-            <h3 style="margin-top:18px; margin-bottom:6px;">Товары в наличии (STORAGE)</h3>
+            <h3 style="margin-top:18px; margin-bottom:6px;">Товары в наличии </h3>
 
             <table>
                 <thead>
@@ -123,7 +120,7 @@
             <!-- hidden inputs будут добавляться сюда -->
             <div id="hiddenInputs"></div>
 
-            <button type="submit" style="margin-top:16px;">Создать Outbound и задачи DELIVERY</button>
+            <button type="submit" style="margin-top:16px;">Создать заявку</button>
 
         </form>
     </div>
