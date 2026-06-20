@@ -1,0 +1,175 @@
+# ============================================================
+# General
+# ============================================================
+
+.DS_Store
+Thumbs.db
+desktop.ini
+
+*.log
+*.tmp
+*.temp
+*.swp
+*.swo
+
+# ============================================================
+# Environment variables / secrets
+# ============================================================
+
+.env
+.env.*
+!.env.example
+
+# ============================================================
+# Java / Maven / Spring Boot
+# ============================================================
+
+target/
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+.mvn/wrapper/maven-wrapper.jar
+
+HELP.md
+
+# Maven local/temporary files
+.mvn/timing.properties
+
+# Spring Boot generated files
+spring.log
+
+# ============================================================
+# Gradle, just in case
+# ============================================================
+
+.gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# ============================================================
+# IntelliJ IDEA
+# ============================================================
+
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+# ============================================================
+# Eclipse / STS
+# ============================================================
+
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache/
+
+# ============================================================
+# NetBeans
+# ============================================================
+
+nbproject/private/
+nbbuild/
+dist/
+nbdist/
+.nb-gradle/
+
+# ============================================================
+# VS Code
+# ============================================================
+
+.vscode/
+
+# ============================================================
+# Python
+# ============================================================
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+.venv/
+venv/
+env/
+ENV/
+
+pip-wheel-metadata/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ============================================================
+# Jupyter, if you ever use notebooks
+# ============================================================
+
+.ipynb_checkpoints/
+
+# ============================================================
+# ROS / ROS2 / colcon / catkin
+# ============================================================
+
+log/
+logs/
+install/
+devel/
+
+
+*.bag
+*.db3
+*.mcap
+
+# ROS generated files
+.cache/
+
+# ============================================================
+# Docker
+# ============================================================
+
+docker/.env
+docker/.env.*
+!docker/.env.example
+
+# Docker compose override files can contain local paths/secrets
+docker-compose.override.yml
+compose.override.yml
+
+# ============================================================
+# Database / dumps / local data
+# ============================================================
+
+*.sql.gz
+*.dump
+*.backup
+
+pgdata/
+postgres-data/
+data/postgres/
+
+# ============================================================
+# OS-specific
+# ============================================================
+
+# Windows
+ehthumbs.db
+Icon?
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+# ============================================================
+# Temporary upload/import files
+# ============================================================
+
+uploads/
+tmp/
+temp/
